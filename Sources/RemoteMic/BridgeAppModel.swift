@@ -724,7 +724,10 @@ final class BridgeAppModel: NSObject, ObservableObject, XiaomiBluetoothBridgeDel
     @Published private(set) var lastSkyworthRemoteButtonPress: RemoteButton?
     @Published private(set) var lastSkyworthButton: SkyworthButton?
     @Published private(set) var activeSkyworthButtons: Set<SkyworthButton> = []
-    @Published private(set) var skyworthButtonMappings: [SkyworthButton: SkyworthButtonBinding] = SkyworthButtonMappingStore.load()
+    @Published private(set) var skyworthMappingConfig: SkyworthMappingConfiguration = SkyworthButtonMappingStore.loadConfiguration()
+    @Published private(set) var frontmostAppBundleID: String? = NSWorkspace.shared.frontmostApplication?.bundleIdentifier
+    private let skyworthGestureRecognizer = SkyworthGestureRecognizer()
+    private var skyworthWorkspaceObserver: NSObjectProtocol?
     @Published private(set) var lastMobileRemoteButtonObservation: MobileRemoteButtonObservation?
     @Published private(set) var isPhoneRemoteConnectionEnabled = false
     @Published private(set) var isPhoneRemoteConnected = false
@@ -755,6 +758,10 @@ final class BridgeAppModel: NSObject, ObservableObject, XiaomiBluetoothBridgeDel
     private let audioOutput = VirtualAudioOutput()
     private lazy var skyworthVoiceMonitor: SkyworthVoiceMonitor = {
         let monitor = SkyworthVoiceMonitor()
+        self.startObservingFrontmostAppForSkyworthIfNeeded()
+        self.skyworthGestureRecognizer.onTrigger = { [weak self] button, gesture in
+            self?.performSkyworthButtonAction(for: button, gesture: gesture)
+        }
         monitor.onConnectionChange = { [weak self] connected in
             guard let self else { return }
             self.skyworthRemoteConnected = connected
@@ -762,6 +769,7 @@ final class BridgeAppModel: NSObject, ObservableObject, XiaomiBluetoothBridgeDel
                 self.lastSkyworthRemoteButtonPress = nil
                 self.lastSkyworthButton = nil
                 self.activeSkyworthButtons = []
+                self.skyworthGestureRecognizer.reset()
                 self.releaseVirtualAudioOutputIfUnused(reason: "skyworth_disconnected")
             } else if self.skyworthUsesSelectedVirtualOutput {
                 self.resumeVirtualAudioOutputIfNeeded(reason: "skyworth_connected")
@@ -776,7 +784,14 @@ final class BridgeAppModel: NSObject, ObservableObject, XiaomiBluetoothBridgeDel
         monitor.onSkyworthButtonPress = { [weak self] button in
             guard let self else { return }
             self.lastSkyworthButton = button
-            self.performSkyworthButtonAction(for: button)
+            let gestures = self.skyworthMappingConfig.resolvedGestures(
+                for: button,
+                frontmostBundleID: self.frontmostAppBundleID
+            )
+            self.skyworthGestureRecognizer.handlePress(button: button, gestures: gestures)
+        }
+        monitor.onSkyworthButtonRelease = { [weak self] button in
+            self?.skyworthGestureRecognizer.handleRelease(button: button)
         }
         monitor.onStart = { [weak self] in
             guard let self, self.started, !self.systemAudioSuspensionState.isSuspended,
@@ -818,30 +833,85 @@ final class BridgeAppModel: NSObject, ObservableObject, XiaomiBluetoothBridgeDel
         settings.voiceKeyMode == .function && !settings.voiceFnTapModeEnabled
     }
 
-    func skyworthButtonBinding(for button: SkyworthButton) -> SkyworthButtonBinding {
-        skyworthButtonMappings[button] ?? SkyworthButtonMappingStore.defaultMappings[button] ?? .native
+    func skyworthGestures(
+        for button: SkyworthButton,
+        appBundleID: String?
+    ) -> SkyworthButtonGestures {
+        skyworthMappingConfig.resolvedGestures(for: button, frontmostBundleID: appBundleID)
     }
 
-    func setSkyworthButtonBinding(_ binding: SkyworthButtonBinding, for button: SkyworthButton) {
-        skyworthButtonMappings[button] = binding
-        SkyworthButtonMappingStore.save(skyworthButtonMappings)
+    func setSkyworthButtonBinding(
+        _ binding: SkyworthButtonBinding?,
+        for button: SkyworthButton,
+        gesture: SkyworthGesture,
+        appBundleID: String?
+    ) {
+        skyworthMappingConfig.setBinding(
+            binding,
+            for: button,
+            gesture: gesture,
+            appBundleID: appBundleID
+        )
+        SkyworthButtonMappingStore.saveConfiguration(skyworthMappingConfig)
+    }
+
+    func clearSkyworthAppOverride(for button: SkyworthButton, appBundleID: String) {
+        skyworthMappingConfig.clearOverride(for: button, appBundleID: appBundleID)
+        SkyworthButtonMappingStore.saveConfiguration(skyworthMappingConfig)
+    }
+
+    func addSkyworthAppProfile(bundleIdentifier: String, displayName: String) {
+        guard !skyworthMappingConfig.appProfiles.contains(where: { $0.bundleIdentifier == bundleIdentifier }) else {
+            return
+        }
+        skyworthMappingConfig.appProfiles.append(
+            SkyworthAppProfile(bundleIdentifier: bundleIdentifier, displayName: displayName)
+        )
+        SkyworthButtonMappingStore.saveConfiguration(skyworthMappingConfig)
+    }
+
+    func removeSkyworthAppProfile(bundleIdentifier: String) {
+        skyworthMappingConfig.appProfiles.removeAll { $0.bundleIdentifier == bundleIdentifier }
+        SkyworthButtonMappingStore.saveConfiguration(skyworthMappingConfig)
     }
 
     func resetSkyworthButtonMappings() {
-        skyworthButtonMappings = SkyworthButtonMappingStore.defaultMappings
-        SkyworthButtonMappingStore.save(skyworthButtonMappings)
+        skyworthMappingConfig = SkyworthMappingConfiguration()
+        SkyworthButtonMappingStore.saveConfiguration(skyworthMappingConfig)
     }
 
-    private func performSkyworthButtonAction(for button: SkyworthButton) {
+    private func startObservingFrontmostAppForSkyworthIfNeeded() {
+        guard skyworthWorkspaceObserver == nil else { return }
+        frontmostAppBundleID = NSWorkspace.shared.frontmostApplication?.bundleIdentifier
+        skyworthWorkspaceObserver = NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.didActivateApplicationNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] notification in
+            guard let app = notification.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication else {
+                return
+            }
+            Task { @MainActor [weak self] in
+                self?.frontmostAppBundleID = app.bundleIdentifier
+            }
+        }
+    }
+
+    private func performSkyworthButtonAction(for button: SkyworthButton, gesture: SkyworthGesture) {
         let suppressDuringOnboarding = OnboardingControlValidationPolicy.suppressConfiguredActions(
             at: settings.onboardingStep,
             source: settings.onboardingControlSource
         )
         guard !suppressDuringOnboarding else { return }
-        let binding = skyworthButtonBinding(for: button)
-        guard let configured = binding.configuredAction else { return }
+        let gestures = skyworthMappingConfig.resolvedGestures(
+            for: button,
+            frontmostBundleID: frontmostAppBundleID
+        )
+        guard let binding = gestures.binding(for: gesture),
+              let configured = binding.configuredAction
+        else { return }
         if configured.action.isAppInternal {
-            _ = performInternalAction(configured.action, source: "skyworth:\(button.rawValue)")
+            _ = performInternalAction(configured.action, source: "skyworth:\(button.rawValue):\(gesture.rawValue)")
             return
         }
         guard KeyboardInjector.isAccessibilityTrusted else {

@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct SkyworthCanvasPlacement: Identifiable {
     let button: SkyworthButton
@@ -13,31 +14,31 @@ struct SkyworthCanvasPlacement: Identifiable {
 }
 
 enum SkyworthCanvasLayout {
-    static let canvasHeight: CGFloat = 620
+    static let canvasHeight: CGFloat = 640
     static let remoteSize = CGSize(width: 210, height: 530)
     static let arrowCardGap: CGFloat = 6
 
     static let voiceAnchor = UnitPoint(x: 0.50, y: 0.178)
-    static let voiceTargetY: CGFloat = 0.065
+    static let voiceTargetY: CGFloat = 0.062
 
     static let placements: [SkyworthCanvasPlacement] = [
         // Left column (7 buttons)
-        SkyworthCanvasPlacement(button: .power, side: .left, anchor: UnitPoint(x: 0.28, y: 0.088), targetY: 0.085),
-        SkyworthCanvasPlacement(button: .input, side: .left, anchor: UnitPoint(x: 0.72, y: 0.088), targetY: 0.220),
-        SkyworthCanvasPlacement(button: .up, side: .left, anchor: UnitPoint(x: 0.50, y: 0.292), targetY: 0.355),
-        SkyworthCanvasPlacement(button: .left, side: .left, anchor: UnitPoint(x: 0.24, y: 0.378), targetY: 0.490),
-        SkyworthCanvasPlacement(button: .back, side: .left, anchor: UnitPoint(x: 0.25, y: 0.545), targetY: 0.625),
-        SkyworthCanvasPlacement(button: .home, side: .left, anchor: UnitPoint(x: 0.50, y: 0.545), targetY: 0.760),
+        SkyworthCanvasPlacement(button: .power, side: .left, anchor: UnitPoint(x: 0.28, y: 0.088), targetY: 0.080),
+        SkyworthCanvasPlacement(button: .input, side: .left, anchor: UnitPoint(x: 0.72, y: 0.088), targetY: 0.215),
+        SkyworthCanvasPlacement(button: .up, side: .left, anchor: UnitPoint(x: 0.50, y: 0.292), targetY: 0.350),
+        SkyworthCanvasPlacement(button: .left, side: .left, anchor: UnitPoint(x: 0.24, y: 0.378), targetY: 0.485),
+        SkyworthCanvasPlacement(button: .back, side: .left, anchor: UnitPoint(x: 0.25, y: 0.545), targetY: 0.620),
+        SkyworthCanvasPlacement(button: .home, side: .left, anchor: UnitPoint(x: 0.50, y: 0.545), targetY: 0.755),
         SkyworthCanvasPlacement(button: .multitask, side: .left, anchor: UnitPoint(x: 0.72, y: 0.655), targetY: 0.895),
 
         // Right column (7 buttons below voice status card)
-        SkyworthCanvasPlacement(button: .right, side: .right, anchor: UnitPoint(x: 0.76, y: 0.378), targetY: 0.200),
-        SkyworthCanvasPlacement(button: .ok, side: .right, anchor: UnitPoint(x: 0.50, y: 0.378), targetY: 0.320),
+        SkyworthCanvasPlacement(button: .right, side: .right, anchor: UnitPoint(x: 0.76, y: 0.378), targetY: 0.195),
+        SkyworthCanvasPlacement(button: .ok, side: .right, anchor: UnitPoint(x: 0.50, y: 0.378), targetY: 0.318),
         SkyworthCanvasPlacement(button: .down, side: .right, anchor: UnitPoint(x: 0.50, y: 0.464), targetY: 0.440),
-        SkyworthCanvasPlacement(button: .menu, side: .right, anchor: UnitPoint(x: 0.75, y: 0.545), targetY: 0.560),
-        SkyworthCanvasPlacement(button: .volumeUp, side: .right, anchor: UnitPoint(x: 0.28, y: 0.648), targetY: 0.680),
-        SkyworthCanvasPlacement(button: .volumeDown, side: .right, anchor: UnitPoint(x: 0.28, y: 0.742), targetY: 0.800),
-        SkyworthCanvasPlacement(button: .quickDots, side: .right, anchor: UnitPoint(x: 0.72, y: 0.742), targetY: 0.920),
+        SkyworthCanvasPlacement(button: .menu, side: .right, anchor: UnitPoint(x: 0.75, y: 0.545), targetY: 0.562),
+        SkyworthCanvasPlacement(button: .volumeUp, side: .right, anchor: UnitPoint(x: 0.28, y: 0.648), targetY: 0.684),
+        SkyworthCanvasPlacement(button: .volumeDown, side: .right, anchor: UnitPoint(x: 0.28, y: 0.742), targetY: 0.806),
+        SkyworthCanvasPlacement(button: .quickDots, side: .right, anchor: UnitPoint(x: 0.72, y: 0.742), targetY: 0.925),
     ]
 
     static func remotePoint(for anchor: UnitPoint, canvasWidth: CGFloat) -> CGPoint {
@@ -52,7 +53,7 @@ enum SkyworthCanvasLayout {
     }
 
     static func cardWidth(for canvasWidth: CGFloat) -> CGFloat {
-        min(280, max(220, (canvasWidth - remoteSize.width - 110) / 2))
+        min(290, max(224, (canvasWidth - remoteSize.width - 104) / 2))
     }
 
     static func cardEdgePoint(
@@ -73,6 +74,7 @@ struct SkyworthButtonsMappingView: View {
     @ObservedObject var model: BridgeAppModel
     let onOpenVoiceConnection: () -> Void
 
+    @State private var selectedAppBundleID: String? = nil // nil = Global profile
     @State private var selectedButton: SkyworthButton?
     @State private var hoveredButton: SkyworthButton?
 
@@ -81,8 +83,9 @@ struct SkyworthButtonsMappingView: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
+        VStack(alignment: .leading, spacing: 12) {
             headerBar
+            profileSwitcherBar
             canvasCard
         }
     }
@@ -132,10 +135,171 @@ struct SkyworthButtonsMappingView: View {
 
                 Button(localization.text("skyworth.mapping.reset_defaults")) {
                     model.resetSkyworthButtonMappings()
+                    selectedAppBundleID = nil
                 }
                 .compatibilityButtonStyle(.standard)
             }
         }
+    }
+
+    private var profileSwitcherBar: some View {
+        GlassPanel {
+            HStack(spacing: 8) {
+                Text(localization.text("skyworth.profile.scope"))
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(.secondary)
+
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 6) {
+                        profileChip(
+                            title: localization.text("skyworth.profile.global"),
+                            icon: nil,
+                            isSelected: selectedAppBundleID == nil,
+                            isActiveFrontmost: selectedAppBundleID == nil
+                                && !model.skyworthMappingConfig.appProfiles.contains(where: { $0.bundleIdentifier == model.frontmostAppBundleID }),
+                            onSelect: { selectedAppBundleID = nil },
+                            onRemove: nil
+                        )
+
+                        ForEach(model.skyworthMappingConfig.appProfiles) { profile in
+                            profileChip(
+                                title: profile.displayName,
+                                icon: appIcon(for: profile.bundleIdentifier),
+                                isSelected: selectedAppBundleID == profile.bundleIdentifier,
+                                isActiveFrontmost: model.frontmostAppBundleID == profile.bundleIdentifier,
+                                onSelect: { selectedAppBundleID = profile.bundleIdentifier },
+                                onRemove: {
+                                    if selectedAppBundleID == profile.bundleIdentifier {
+                                        selectedAppBundleID = nil
+                                    }
+                                    model.removeSkyworthAppProfile(bundleIdentifier: profile.bundleIdentifier)
+                                }
+                            )
+                        }
+                    }
+                }
+
+                Menu {
+                    let candidates = runningAppCandidates()
+                    if !candidates.isEmpty {
+                        Section(localization.text("skyworth.profile.running_apps")) {
+                            ForEach(candidates, id: \.bundleIdentifier) { app in
+                                Button(app.displayName) {
+                                    model.addSkyworthAppProfile(
+                                        bundleIdentifier: app.bundleIdentifier,
+                                        displayName: app.displayName
+                                    )
+                                    selectedAppBundleID = app.bundleIdentifier
+                                }
+                            }
+                        }
+                    }
+                    Divider()
+                    Button(localization.text("skyworth.profile.choose_app")) {
+                        pickApplicationPanel()
+                    }
+                } label: {
+                    Label(localization.text("skyworth.profile.add_app"), systemImage: "plus")
+                        .font(.system(size: 12, weight: .medium))
+                }
+                .menuStyle(.borderlessButton)
+                .fixedSize()
+            }
+        }
+    }
+
+    private func profileChip(
+        title: String,
+        icon: NSImage?,
+        isSelected: Bool,
+        isActiveFrontmost: Bool,
+        onSelect: @escaping () -> Void,
+        onRemove: (() -> Void)?
+    ) -> some View {
+        HStack(spacing: 5) {
+            Button(action: onSelect) {
+                HStack(spacing: 5) {
+                    if let icon {
+                        Image(nsImage: icon)
+                            .resizable()
+                            .frame(width: 14, height: 14)
+                    } else {
+                        Image(systemName: "globe")
+                            .font(.system(size: 11))
+                    }
+                    Text(title)
+                        .font(.system(size: 12, weight: isSelected ? .semibold : .regular))
+                        .lineLimit(1)
+                    if isActiveFrontmost {
+                        Circle()
+                            .fill(Color.green)
+                            .frame(width: 6, height: 6)
+                    }
+                }
+            }
+            .buttonStyle(.plain)
+
+            if let onRemove {
+                Button(action: onRemove) {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 9, weight: .bold))
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(.horizontal, 9)
+        .padding(.vertical, 4)
+        .background(
+            Capsule()
+                .fill(isSelected ? Color.accentColor.opacity(0.16) : Color.primary.opacity(0.06))
+        )
+        .overlay(
+            Capsule()
+                .stroke(isSelected ? Color.accentColor : Color.clear, lineWidth: 1.2)
+        )
+    }
+
+    private func runningAppCandidates() -> [(bundleIdentifier: String, displayName: String)] {
+        let existing = Set(model.skyworthMappingConfig.appProfiles.map(\.bundleIdentifier))
+        let selfBundle = Bundle.main.bundleIdentifier
+        return NSWorkspace.shared.runningApplications
+            .filter { $0.activationPolicy == .regular }
+            .compactMap { app -> (String, String)? in
+                guard let id = app.bundleIdentifier,
+                      id != selfBundle,
+                      !existing.contains(id),
+                      let name = app.localizedName, !name.isEmpty
+                else { return nil }
+                return (id, name)
+            }
+            .sorted { $0.1.localizedCaseInsensitiveCompare($1.1) == .orderedAscending }
+    }
+
+    private func appIcon(for bundleIdentifier: String) -> NSImage? {
+        guard let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleIdentifier) else {
+            return nil
+        }
+        return NSWorkspace.shared.icon(forFile: url.path)
+    }
+
+    private func pickApplicationPanel() {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = false
+        panel.allowedContentTypes = [.application]
+        panel.directoryURL = URL(fileURLWithPath: "/Applications")
+        guard panel.runModal() == .OK,
+              let url = panel.url,
+              let bundle = Bundle(url: url),
+              let bundleID = bundle.bundleIdentifier
+        else { return }
+        let name = (bundle.object(forInfoDictionaryKey: "CFBundleDisplayName") as? String)
+            ?? (bundle.object(forInfoDictionaryKey: "CFBundleName") as? String)
+            ?? url.deletingPathExtension().lastPathComponent
+        model.addSkyworthAppProfile(bundleIdentifier: bundleID, displayName: name)
+        selectedAppBundleID = bundleID
     }
 
     private var canvasCard: some View {
@@ -181,11 +345,15 @@ struct SkyworthButtonsMappingView: View {
                         let isLast = model.lastSkyworthButton == placement.button
                         let isSelected = selectedButton == placement.button
                         let isHovered = hoveredButton == placement.button
-                        let binding = model.skyworthButtonBinding(for: placement.button)
+                        let gestures = model.skyworthGestures(for: placement.button, appBundleID: selectedAppBundleID)
+                        let isInherited = selectedAppBundleID.map {
+                            !model.skyworthMappingConfig.hasOverride(for: placement.button, inApp: $0)
+                        } ?? false
 
                         SkyworthMappingRowCard(
                             button: placement.button,
-                            binding: binding,
+                            gestures: gestures,
+                            isInherited: isInherited,
                             isPressed: isPressed,
                             isLast: isLast,
                             isSelected: isSelected,
@@ -215,9 +383,23 @@ struct SkyworthButtonsMappingView: View {
                         ) {
                             SkyworthButtonBindingEditor(
                                 button: placement.button,
-                                currentBinding: binding,
-                                onSelect: { newBinding in
-                                    model.setSkyworthButtonBinding(newBinding, for: placement.button)
+                                gestures: gestures,
+                                appBundleID: selectedAppBundleID,
+                                hasAppOverride: selectedAppBundleID.map {
+                                    model.skyworthMappingConfig.hasOverride(for: placement.button, inApp: $0)
+                                } ?? false,
+                                onSelect: { newBinding, gesture in
+                                    model.setSkyworthButtonBinding(
+                                        newBinding,
+                                        for: placement.button,
+                                        gesture: gesture,
+                                        appBundleID: selectedAppBundleID
+                                    )
+                                },
+                                onClearAppOverride: {
+                                    if let appBundleID = selectedAppBundleID {
+                                        model.clearSkyworthAppOverride(for: placement.button, appBundleID: appBundleID)
+                                    }
                                 },
                                 onClose: {
                                     selectedButton = nil
@@ -234,7 +416,6 @@ struct SkyworthButtonsMappingView: View {
 
     private func connectorLines(canvasWidth: CGFloat, cardWidth: CGFloat) -> some View {
         Canvas { context, _ in
-            // Voice connector
             let voiceStart = SkyworthCanvasLayout.remotePoint(
                 for: SkyworthCanvasLayout.voiceAnchor,
                 canvasWidth: canvasWidth
@@ -341,7 +522,8 @@ struct SkyworthButtonsMappingView: View {
 private struct SkyworthMappingRowCard: View {
     @EnvironmentObject private var localization: LocalizationStore
     let button: SkyworthButton
-    let binding: SkyworthButtonBinding
+    let gestures: SkyworthButtonGestures
+    let isInherited: Bool
     let isPressed: Bool
     let isLast: Bool
     let isSelected: Bool
@@ -355,32 +537,62 @@ private struct SkyworthMappingRowCard: View {
 
     var body: some View {
         Button(action: onTap) {
-            HStack(spacing: 8) {
-                Image(systemName: button.symbolName)
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(isEmphasized ? Color.accentColor : .secondary)
-                    .frame(width: 18)
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 7) {
+                    Image(systemName: button.symbolName)
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(isEmphasized ? Color.accentColor : .secondary)
+                        .frame(width: 16)
 
-                Text(button.displayName(using: localization))
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(.primary)
-                    .lineLimit(1)
+                    Text(button.displayName(using: localization))
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(isInherited ? .secondary : .primary)
+                        .lineLimit(1)
 
-                Spacer(minLength: 4)
+                    if isInherited {
+                        Image(systemName: "link")
+                            .font(.system(size: 9))
+                            .foregroundStyle(.tertiary)
+                    }
 
-                Text(binding.displayName(using: localization))
-                    .font(.system(size: 11, weight: binding.isCustom ? .semibold : .regular))
-                    .foregroundStyle(binding.isCustom ? Color.accentColor : .secondary)
-                    .padding(.horizontal, 7)
-                    .padding(.vertical, 3)
-                    .background(
-                        RoundedRectangle(cornerRadius: 6)
-                            .fill(binding.isCustom ? Color.accentColor.opacity(0.12) : Color.primary.opacity(0.06))
-                    )
-                    .lineLimit(1)
+                    Spacer(minLength: 4)
+
+                    Text(gestures.singleClick.displayName(using: localization))
+                        .font(.system(size: 11, weight: gestures.singleClick.isCustom ? .semibold : .regular))
+                        .foregroundStyle(
+                            gestures.singleClick.isCustom
+                                ? (isInherited ? Color.accentColor.opacity(0.7) : Color.accentColor)
+                                : .secondary
+                        )
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(
+                            RoundedRectangle(cornerRadius: 5)
+                                .fill(gestures.singleClick.isCustom ? Color.accentColor.opacity(0.11) : Color.primary.opacity(0.06))
+                        )
+                        .lineLimit(1)
+                }
+
+                if gestures.hasDoubleClick || gestures.hasLongPress {
+                    HStack(spacing: 6) {
+                        Spacer(minLength: 0)
+                        if let dbl = gestures.doubleClick, dbl.isCustom {
+                            gestureMiniChip(
+                                prefix: localization.text("skyworth.gesture.double_short"),
+                                value: dbl.displayName(using: localization)
+                            )
+                        }
+                        if let lng = gestures.longPress, lng.isCustom {
+                            gestureMiniChip(
+                                prefix: localization.text("skyworth.gesture.long_short"),
+                                value: lng.displayName(using: localization)
+                            )
+                        }
+                    }
+                }
             }
             .padding(.horizontal, 10)
-            .padding(.vertical, 7)
+            .padding(.vertical, gestures.hasDoubleClick || gestures.hasLongPress ? 5 : 7)
             .background(
                 RoundedRectangle(cornerRadius: 10)
                     .fill(
@@ -402,6 +614,20 @@ private struct SkyworthMappingRowCard: View {
         }
         .buttonStyle(.plain)
         .onHover(perform: onHover)
+    }
+
+    private func gestureMiniChip(prefix: String, value: String) -> some View {
+        HStack(spacing: 3) {
+            Text(prefix)
+                .foregroundStyle(.secondary)
+            Text(value)
+                .foregroundStyle(.primary)
+                .lineLimit(1)
+        }
+        .font(.system(size: 10, weight: .medium))
+        .padding(.horizontal, 5)
+        .padding(.vertical, 1.5)
+        .background(.quaternary.opacity(0.85), in: RoundedRectangle(cornerRadius: 4))
     }
 }
 
@@ -432,7 +658,6 @@ private struct SkyworthVectorRemoteView: View {
 
     var body: some View {
         ZStack {
-            // Remote chassis
             RoundedRectangle(cornerRadius: 34, style: .continuous)
                 .fill(bodyGradient)
                 .overlay(
@@ -442,7 +667,6 @@ private struct SkyworthVectorRemoteView: View {
                 .shadow(color: .black.opacity(0.28), radius: 14, y: 8)
 
             VStack(spacing: 0) {
-                // Top row: Power (red) & Input
                 HStack {
                     remoteCircleButton(.power, diameter: 34, tint: .red) {
                         Image(systemName: "power")
@@ -459,7 +683,6 @@ private struct SkyworthVectorRemoteView: View {
                 .padding(.horizontal, 28)
                 .padding(.top, 26)
 
-                // Voice Mic button
                 ZStack {
                     Circle()
                         .fill(voiceActive ? Color.orange : Color(white: 0.28))
@@ -475,7 +698,6 @@ private struct SkyworthVectorRemoteView: View {
                 }
                 .padding(.top, 14)
 
-                // D-Pad ring + center OK
                 ZStack {
                     Circle()
                         .fill(Color(white: 0.24))
@@ -521,7 +743,6 @@ private struct SkyworthVectorRemoteView: View {
                 }
                 .padding(.top, 18)
 
-                // Nav row: Back / Home / Menu
                 HStack(spacing: 16) {
                     remoteCircleButton(.back, diameter: 36) {
                         Image(systemName: "arrow.uturn.backward")
@@ -541,9 +762,7 @@ private struct SkyworthVectorRemoteView: View {
                 }
                 .padding(.top, 20)
 
-                // Lower row: Volume rocker (left) + Multitask & QuickDots (right)
                 HStack(spacing: 34) {
-                    // Volume rocker capsule
                     VStack(spacing: 0) {
                         remoteRockerHalf(.volumeUp, top: true) {
                             Text("+")
@@ -566,7 +785,6 @@ private struct SkyworthVectorRemoteView: View {
                             .overlay(Capsule().stroke(Color.white.opacity(0.14), lineWidth: 1))
                     )
 
-                    // Right column: Dual-box (multitask) & Colorful 3-dots (quickDots)
                     VStack(spacing: 18) {
                         remoteCircleButton(.multitask, diameter: 38) {
                             Image(systemName: "square.on.square")
@@ -675,41 +893,79 @@ private struct SkyworthVectorRemoteView: View {
 private struct SkyworthButtonBindingEditor: View {
     @EnvironmentObject private var localization: LocalizationStore
     let button: SkyworthButton
-    let currentBinding: SkyworthButtonBinding
-    let onSelect: (SkyworthButtonBinding) -> Void
+    let gestures: SkyworthButtonGestures
+    let appBundleID: String?
+    let hasAppOverride: Bool
+    let onSelect: (SkyworthButtonBinding?, SkyworthGesture) -> Void
+    let onClearAppOverride: () -> Void
     let onClose: () -> Void
 
+    @State private var selectedGesture: SkyworthGesture = .singleClick
     @State private var isRecordingShortcut = false
     @State private var keyMonitor: Any?
 
+    private var activeBinding: SkyworthButtonBinding? {
+        gestures.binding(for: selectedGesture)
+    }
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 11) {
             HStack {
                 Image(systemName: button.symbolName)
                     .foregroundStyle(Color.accentColor)
                 Text(button.displayName(using: localization))
                     .font(.system(size: 14, weight: .semibold))
                 Spacer()
-                Text(button.hidCodeLabel)
-                    .font(.system(size: 10, design: .monospaced))
-                    .foregroundStyle(.secondary)
+                if appBundleID != nil, hasAppOverride {
+                    Button(localization.text("skyworth.profile.inherit_global")) {
+                        stopRecording()
+                        onClearAppOverride()
+                        onClose()
+                    }
+                    .font(.system(size: 11))
+                    .buttonStyle(.link)
+                } else {
+                    Text(button.hidCodeLabel)
+                        .font(.system(size: 10, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                }
             }
 
-            // Mode 1: Native passthrough
+            Picker("", selection: $selectedGesture) {
+                ForEach(SkyworthGesture.allCases) { gesture in
+                    Text(gesture.displayName(using: localization)).tag(gesture)
+                }
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .onChange(of: selectedGesture) { _, _ in
+                stopRecording()
+            }
+
+            // Native / Unset option
             Button {
                 stopRecording()
-                onSelect(.native)
-                onClose()
+                onSelect(selectedGesture == .singleClick ? .native : nil, selectedGesture)
             } label: {
+                let isSelectedNone = (selectedGesture == .singleClick && activeBinding == .native)
+                    || (selectedGesture != .singleClick && activeBinding == nil)
                 HStack {
-                    Image(systemName: currentBinding == .native ? "checkmark.circle.fill" : "circle")
-                        .foregroundStyle(currentBinding == .native ? Color.accentColor : .secondary)
+                    Image(systemName: isSelectedNone ? "checkmark.circle.fill" : "circle")
+                        .foregroundStyle(isSelectedNone ? Color.accentColor : .secondary)
                     VStack(alignment: .leading, spacing: 2) {
-                        Text(localization.text("skyworth.binding.native"))
-                            .font(.system(size: 12, weight: .semibold))
-                        Text(localization.text("skyworth.binding.native_hint"))
-                            .font(.system(size: 11))
-                            .foregroundStyle(.secondary)
+                        Text(localization.text(
+                            selectedGesture == .singleClick
+                                ? "skyworth.binding.native"
+                                : "skyworth.gesture.unset"
+                        ))
+                        .font(.system(size: 12, weight: .semibold))
+                        Text(localization.text(
+                            selectedGesture == .singleClick
+                                ? "skyworth.binding.native_hint"
+                                : "skyworth.gesture.unset_hint"
+                        ))
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
                     }
                     Spacer()
                 }
@@ -718,46 +974,43 @@ private struct SkyworthButtonBindingEditor: View {
             }
             .buttonStyle(.plain)
 
-            // Mode 2: Custom Mac shortcut recorder
+            // Custom Mac shortcut recorder
             VStack(alignment: .leading, spacing: 6) {
                 Text(localization.text("skyworth.editor.custom_shortcut"))
                     .font(.system(size: 11, weight: .semibold))
                     .foregroundStyle(.secondary)
-                HStack(spacing: 8) {
-                    Button {
-                        if isRecordingShortcut {
-                            stopRecording()
-                        } else {
-                            startRecording()
-                        }
-                    } label: {
-                        HStack(spacing: 6) {
-                            Image(systemName: isRecordingShortcut ? "record.circle" : "keyboard")
-                                .foregroundStyle(isRecordingShortcut ? Color.red : Color.accentColor)
-                            if isRecordingShortcut {
-                                Text(localization.text("skyworth.editor.press_shortcut"))
-                            } else if case .customShortcut(let shortcut) = currentBinding {
-                                Text(shortcut.displayName(using: localization))
-                            } else {
-                                Text(localization.text("skyworth.editor.record_shortcut"))
-                            }
-                        }
-                        .font(.system(size: 12, weight: .medium))
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 6)
-                        .padding(.horizontal, 10)
-                        .background(
-                            RoundedRectangle(cornerRadius: 8)
-                                .fill(isRecordingShortcut ? Color.red.opacity(0.12) : Color.accentColor.opacity(0.1))
-                        )
+                Button {
+                    if isRecordingShortcut {
+                        stopRecording()
+                    } else {
+                        startRecording()
                     }
-                    .buttonStyle(.plain)
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: isRecordingShortcut ? "record.circle" : "keyboard")
+                            .foregroundStyle(isRecordingShortcut ? Color.red : Color.accentColor)
+                        if isRecordingShortcut {
+                            Text(localization.text("skyworth.editor.press_shortcut"))
+                        } else if case .customShortcut(let shortcut) = activeBinding {
+                            Text(shortcut.displayName(using: localization))
+                        } else {
+                            Text(localization.text("skyworth.editor.record_shortcut"))
+                        }
+                    }
+                    .font(.system(size: 12, weight: .medium))
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 6)
+                    .padding(.horizontal, 10)
+                    .background(
+                        RoundedRectangle(cornerRadius: 8)
+                            .fill(isRecordingShortcut ? Color.red.opacity(0.12) : Color.accentColor.opacity(0.1))
+                    )
                 }
+                .buttonStyle(.plain)
             }
 
             Divider()
 
-            // Mode 3: Preset actions
             ScrollView {
                 VStack(alignment: .leading, spacing: 10) {
                     ForEach(SkyworthButtonMappingStore.presetGroups) { group in
@@ -770,11 +1023,10 @@ private struct SkyworthButtonBindingEditor: View {
                                 spacing: 6
                             ) {
                                 ForEach(group.actions) { action in
-                                    let selected = currentBinding == .action(action)
+                                    let selected = activeBinding == .action(action)
                                     Button {
                                         stopRecording()
-                                        onSelect(.action(action))
-                                        onClose()
+                                        onSelect(.action(action), selectedGesture)
                                     } label: {
                                         Text(action.displayName(using: localization))
                                             .font(.system(size: 11, weight: selected ? .semibold : .regular))
@@ -795,10 +1047,10 @@ private struct SkyworthButtonBindingEditor: View {
                     }
                 }
             }
-            .frame(maxHeight: 240)
+            .frame(maxHeight: 220)
         }
         .padding(14)
-        .frame(width: 310)
+        .frame(width: 324)
         .onDisappear {
             stopRecording()
         }
@@ -814,8 +1066,7 @@ private struct SkyworthButtonBindingEditor: View {
             }
             let shortcut = CustomKeyboardShortcut(event: event)
             stopRecording()
-            onSelect(.customShortcut(shortcut))
-            onClose()
+            onSelect(.customShortcut(shortcut), selectedGesture)
             return nil
         }
     }

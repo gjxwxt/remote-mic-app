@@ -208,22 +208,52 @@ struct SkyworthSBCDecoderTests {
         #expect(heldSnapshots.last == [])
     }
 
-    @Test func skyworthMappingStorePersistsCustomBindingsAndDefaults() {
+    @Test func skyworthMappingStorePersistsGesturesAndPerAppProfiles() {
         let suiteName = "test.skyworth.mapping.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
         defer { defaults.removePersistentDomain(forName: suiteName) }
 
-        let initial = SkyworthButtonMappingStore.load(from: defaults)
-        #expect(initial[.quickDots] == .action(.appSwitcher))
-        #expect(initial[.multitask] == .action(.missionControl))
-        #expect(initial[.ok] == .action(.returnKey))
+        var config = SkyworthButtonMappingStore.loadConfiguration(from: defaults)
+        #expect(config.globalGestures(for: .quickDots).singleClick == .action(.appSwitcher))
+        #expect(config.globalGestures(for: .ok).longPress == .action(.commandReturn))
 
-        var updated = initial
-        updated[.quickDots] = .action(.screenshot)
-        SkyworthButtonMappingStore.save(updated, to: defaults)
+        config.appProfiles.append(SkyworthAppProfile(bundleIdentifier: "com.tencent.xinWeChat", displayName: "WeChat"))
+        config.setBinding(.action(.commandReturn), for: .ok, gesture: .singleClick, appBundleID: "com.tencent.xinWeChat")
+        config.setBinding(.action(.screenshot), for: .quickDots, gesture: .doubleClick, appBundleID: nil)
+        SkyworthButtonMappingStore.saveConfiguration(config, to: defaults)
 
-        let reloaded = SkyworthButtonMappingStore.load(from: defaults)
-        #expect(reloaded[.quickDots] == .action(.screenshot))
-        #expect(reloaded[.ok] == .action(.returnKey))
+        let reloaded = SkyworthButtonMappingStore.loadConfiguration(from: defaults)
+        #expect(reloaded.resolvedGestures(for: .ok, frontmostBundleID: "com.tencent.xinWeChat").singleClick == .action(.commandReturn))
+        #expect(reloaded.resolvedGestures(for: .ok, frontmostBundleID: "com.apple.Safari").singleClick == .action(.returnKey))
+        #expect(reloaded.resolvedGestures(for: .quickDots, frontmostBundleID: "com.tencent.xinWeChat").doubleClick == .action(.screenshot))
+    }
+
+    @Test @MainActor func skyworthGestureRecognizerHandlesSingleDoubleAndLongPress() async throws {
+        let recognizer = SkyworthGestureRecognizer(doubleClickWindow: 0.08, longPressDuration: 0.08)
+        var events: [(SkyworthButton, SkyworthGesture)] = []
+        recognizer.onTrigger = { events.append(($0, $1)) }
+
+        // Instant single-click when no double-click or long-press is bound.
+        let instant = SkyworthButtonGestures(singleClick: .action(.returnKey))
+        recognizer.handlePress(button: .ok, gestures: instant)
+        recognizer.handleRelease(button: .ok)
+        #expect(events.count == 1 && events[0].1 == .singleClick)
+
+        // Long-press fires while held and suppresses release single-click.
+        let withLong = SkyworthButtonGestures(singleClick: .action(.returnKey), longPress: .action(.commandReturn))
+        recognizer.handlePress(button: .ok, gestures: withLong)
+        try await Task.sleep(for: .milliseconds(120))
+        recognizer.handleRelease(button: .ok)
+        #expect(events.count == 2 && events[1].1 == .longPress)
+
+        // Double-click cancels pending single-click.
+        let withDouble = SkyworthButtonGestures(singleClick: .action(.escape), doubleClick: .action(.deleteBackward))
+        recognizer.handlePress(button: .back, gestures: withDouble)
+        recognizer.handleRelease(button: .back)
+        try await Task.sleep(for: .milliseconds(25))
+        recognizer.handlePress(button: .back, gestures: withDouble)
+        recognizer.handleRelease(button: .back)
+        try await Task.sleep(for: .milliseconds(120))
+        #expect(events.count == 3 && events[2].1 == .doubleClick)
     }
 }

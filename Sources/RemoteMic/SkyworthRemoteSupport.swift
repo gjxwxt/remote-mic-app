@@ -125,6 +125,22 @@ enum SkyworthButton: String, CaseIterable, Codable, Identifiable, Hashable {
     }
 }
 
+enum SkyworthGesture: String, CaseIterable, Codable, Identifiable, Hashable {
+    case singleClick = "single_click"
+    case doubleClick = "double_click"
+    case longPress = "long_press"
+
+    var id: String { rawValue }
+
+    func displayName(using localization: LocalizationStore) -> String {
+        switch self {
+        case .singleClick: return localization.text("skyworth.gesture.single")
+        case .doubleClick: return localization.text("skyworth.gesture.double")
+        case .longPress: return localization.text("skyworth.gesture.long")
+        }
+    }
+}
+
 enum SkyworthButtonBinding: Codable, Equatable {
     case native
     case action(ButtonAction)
@@ -159,6 +175,127 @@ enum SkyworthButtonBinding: Codable, Equatable {
     }
 }
 
+struct SkyworthButtonGestures: Codable, Equatable {
+    var singleClick: SkyworthButtonBinding
+    var doubleClick: SkyworthButtonBinding?
+    var longPress: SkyworthButtonBinding?
+
+    init(
+        singleClick: SkyworthButtonBinding = .native,
+        doubleClick: SkyworthButtonBinding? = nil,
+        longPress: SkyworthButtonBinding? = nil
+    ) {
+        self.singleClick = singleClick
+        self.doubleClick = doubleClick
+        self.longPress = longPress
+    }
+
+    var hasDoubleClick: Bool {
+        doubleClick?.configuredAction != nil
+    }
+
+    var hasLongPress: Bool {
+        longPress?.configuredAction != nil
+    }
+
+    func binding(for gesture: SkyworthGesture) -> SkyworthButtonBinding? {
+        switch gesture {
+        case .singleClick: return singleClick
+        case .doubleClick: return doubleClick
+        case .longPress: return longPress
+        }
+    }
+
+    mutating func setBinding(_ binding: SkyworthButtonBinding?, for gesture: SkyworthGesture) {
+        switch gesture {
+        case .singleClick:
+            singleClick = binding ?? .native
+        case .doubleClick:
+            doubleClick = (binding?.isCustom == true) ? binding : nil
+        case .longPress:
+            longPress = (binding?.isCustom == true) ? binding : nil
+        }
+    }
+}
+
+struct SkyworthAppProfile: Codable, Equatable, Identifiable {
+    let bundleIdentifier: String
+    var displayName: String
+    /// Per-button overrides keyed by `SkyworthButton.rawValue`. Unlisted buttons inherit Global.
+    var overrides: [String: SkyworthButtonGestures]
+
+    var id: String { bundleIdentifier }
+
+    init(
+        bundleIdentifier: String,
+        displayName: String,
+        overrides: [String: SkyworthButtonGestures] = [:]
+    ) {
+        self.bundleIdentifier = bundleIdentifier
+        self.displayName = displayName
+        self.overrides = overrides
+    }
+}
+
+struct SkyworthMappingConfiguration: Codable, Equatable {
+    var global: [String: SkyworthButtonGestures]
+    var appProfiles: [SkyworthAppProfile]
+
+    init(
+        global: [String: SkyworthButtonGestures] = SkyworthButtonMappingStore.defaultGlobalRawMappings,
+        appProfiles: [SkyworthAppProfile] = []
+    ) {
+        self.global = global
+        self.appProfiles = appProfiles
+    }
+
+    func globalGestures(for button: SkyworthButton) -> SkyworthButtonGestures {
+        global[button.rawValue]
+            ?? SkyworthButtonMappingStore.defaultGestures[button]
+            ?? SkyworthButtonGestures()
+    }
+
+    func hasOverride(for button: SkyworthButton, inApp bundleIdentifier: String) -> Bool {
+        appProfiles.first(where: { $0.bundleIdentifier == bundleIdentifier })?
+            .overrides[button.rawValue] != nil
+    }
+
+    func resolvedGestures(
+        for button: SkyworthButton,
+        frontmostBundleID: String?
+    ) -> SkyworthButtonGestures {
+        if let bundleID = frontmostBundleID,
+           let profile = appProfiles.first(where: { $0.bundleIdentifier == bundleID }),
+           let override = profile.overrides[button.rawValue] {
+            return override
+        }
+        return globalGestures(for: button)
+    }
+
+    mutating func setBinding(
+        _ binding: SkyworthButtonBinding?,
+        for button: SkyworthButton,
+        gesture: SkyworthGesture,
+        appBundleID: String?
+    ) {
+        if let appBundleID,
+           let index = appProfiles.firstIndex(where: { $0.bundleIdentifier == appBundleID }) {
+            var current = appProfiles[index].overrides[button.rawValue] ?? globalGestures(for: button)
+            current.setBinding(binding, for: gesture)
+            appProfiles[index].overrides[button.rawValue] = current
+        } else {
+            var current = globalGestures(for: button)
+            current.setBinding(binding, for: gesture)
+            global[button.rawValue] = current
+        }
+    }
+
+    mutating func clearOverride(for button: SkyworthButton, appBundleID: String) {
+        guard let index = appProfiles.firstIndex(where: { $0.bundleIdentifier == appBundleID }) else { return }
+        appProfiles[index].overrides.removeValue(forKey: button.rawValue)
+    }
+}
+
 struct SkyworthActionPresetGroup: Identifiable {
     let id: String
     let titleKey: String
@@ -166,24 +303,29 @@ struct SkyworthActionPresetGroup: Identifiable {
 }
 
 enum SkyworthButtonMappingStore {
-    static let defaultsKey = "skyworth.yk8e00.buttonMappings.v1"
+    static let v1DefaultsKey = "skyworth.yk8e00.buttonMappings.v1"
+    static let v2DefaultsKey = "skyworth.yk8e00.buttonMappings.v2"
 
-    static let defaultMappings: [SkyworthButton: SkyworthButtonBinding] = [
-        .power: .native,
-        .input: .action(.openRemoteMic),
-        .up: .native,
-        .left: .native,
-        .ok: .action(.returnKey),
-        .right: .native,
-        .down: .native,
-        .back: .action(.escape),
-        .home: .native,
-        .menu: .action(.commandUndo),
-        .volumeUp: .native,
-        .volumeDown: .native,
-        .multitask: .action(.missionControl),
-        .quickDots: .action(.appSwitcher),
+    static let defaultGestures: [SkyworthButton: SkyworthButtonGestures] = [
+        .power: SkyworthButtonGestures(singleClick: .native),
+        .input: SkyworthButtonGestures(singleClick: .action(.openRemoteMic)),
+        .up: SkyworthButtonGestures(singleClick: .native),
+        .left: SkyworthButtonGestures(singleClick: .native),
+        .ok: SkyworthButtonGestures(singleClick: .action(.returnKey), longPress: .action(.commandReturn)),
+        .right: SkyworthButtonGestures(singleClick: .native),
+        .down: SkyworthButtonGestures(singleClick: .native),
+        .back: SkyworthButtonGestures(singleClick: .action(.escape), longPress: .action(.deleteBackward)),
+        .home: SkyworthButtonGestures(singleClick: .native),
+        .menu: SkyworthButtonGestures(singleClick: .action(.commandUndo), longPress: .action(.commandRedo)),
+        .volumeUp: SkyworthButtonGestures(singleClick: .native),
+        .volumeDown: SkyworthButtonGestures(singleClick: .native),
+        .multitask: SkyworthButtonGestures(singleClick: .action(.missionControl), longPress: .action(.showDesktop)),
+        .quickDots: SkyworthButtonGestures(singleClick: .action(.appSwitcher), longPress: .action(.screenshot)),
     ]
+
+    static var defaultGlobalRawMappings: [String: SkyworthButtonGestures] {
+        Dictionary(uniqueKeysWithValues: defaultGestures.map { ($0.key.rawValue, $0.value) })
+    }
 
     static let presetGroups: [SkyworthActionPresetGroup] = [
         SkyworthActionPresetGroup(
@@ -232,30 +374,116 @@ enum SkyworthButtonMappingStore {
         ),
     ]
 
-    static func load(from defaults: UserDefaults = .standard) -> [SkyworthButton: SkyworthButtonBinding] {
-        var resolved = defaultMappings
-        guard let data = defaults.data(forKey: defaultsKey),
-              let decoded = try? JSONDecoder().decode([String: SkyworthButtonBinding].self, from: data)
-        else {
-            return resolved
+    static func loadConfiguration(from defaults: UserDefaults = .standard) -> SkyworthMappingConfiguration {
+        if let data = defaults.data(forKey: v2DefaultsKey),
+           var decoded = try? JSONDecoder().decode(SkyworthMappingConfiguration.self, from: data) {
+            for (button, gestures) in defaultGestures where decoded.global[button.rawValue] == nil {
+                decoded.global[button.rawValue] = gestures
+            }
+            return decoded
         }
-        for (rawKey, binding) in decoded {
-            if let button = SkyworthButton(rawValue: rawKey) {
-                resolved[button] = binding
+
+        // Migrate v1 single-click mappings if present.
+        var config = SkyworthMappingConfiguration()
+        if let v1Data = defaults.data(forKey: v1DefaultsKey),
+           let v1 = try? JSONDecoder().decode([String: SkyworthButtonBinding].self, from: v1Data) {
+            for (rawKey, binding) in v1 {
+                if let button = SkyworthButton(rawValue: rawKey) {
+                    var gestures = config.globalGestures(for: button)
+                    gestures.singleClick = binding
+                    config.global[rawKey] = gestures
+                }
             }
         }
-        return resolved
+        return config
     }
 
-    static func save(
-        _ mappings: [SkyworthButton: SkyworthButtonBinding],
+    static func saveConfiguration(
+        _ config: SkyworthMappingConfiguration,
         to defaults: UserDefaults = .standard
     ) {
-        let encodedDict = Dictionary(
-            uniqueKeysWithValues: mappings.map { ($0.key.rawValue, $0.value) }
-        )
-        if let data = try? JSONEncoder().encode(encodedDict) {
-            defaults.set(data, forKey: defaultsKey)
+        if let data = try? JSONEncoder().encode(config) {
+            defaults.set(data, forKey: v2DefaultsKey)
         }
+    }
+}
+
+/// Zero-lag gesture recognizer for YK-8E00 buttons.
+/// - No double-click & no long-press configured -> fires `.singleClick` immediately on press.
+/// - Long-press configured -> fires `.longPress` at `longPressDuration` while held, or `.singleClick` on early release.
+/// - Double-click configured -> waits `doubleClickWindow` after first release; second press fires `.doubleClick`.
+final class SkyworthGestureRecognizer {
+    let doubleClickWindow: TimeInterval
+    let longPressDuration: TimeInterval
+    var onTrigger: ((SkyworthButton, SkyworthGesture) -> Void)?
+
+    private var activePressGestures: [SkyworthButton: SkyworthButtonGestures] = [:]
+    private var longPressWork: [SkyworthButton: DispatchWorkItem] = [:]
+    private var longPressFired: Set<SkyworthButton> = []
+    private var pendingSingleClickWork: [SkyworthButton: DispatchWorkItem] = [:]
+
+    init(doubleClickWindow: TimeInterval = 0.26, longPressDuration: TimeInterval = 0.42) {
+        self.doubleClickWindow = doubleClickWindow
+        self.longPressDuration = longPressDuration
+    }
+
+    func handlePress(button: SkyworthButton, gestures: SkyworthButtonGestures) {
+        if let pendingSingle = pendingSingleClickWork.removeValue(forKey: button) {
+            pendingSingle.cancel()
+            activePressGestures.removeValue(forKey: button)
+            longPressFired.insert(button) // Consume matching release
+            onTrigger?(button, .doubleClick)
+            return
+        }
+
+        if !gestures.hasDoubleClick && !gestures.hasLongPress {
+            onTrigger?(button, .singleClick)
+            return
+        }
+
+        activePressGestures[button] = gestures
+        longPressFired.remove(button)
+
+        if gestures.hasLongPress {
+            longPressWork[button]?.cancel()
+            let work = DispatchWorkItem { [weak self] in
+                guard let self, self.activePressGestures[button] != nil else { return }
+                self.longPressWork.removeValue(forKey: button)
+                self.longPressFired.insert(button)
+                self.onTrigger?(button, .longPress)
+            }
+            longPressWork[button] = work
+            DispatchQueue.main.asyncAfter(deadline: .now() + longPressDuration, execute: work)
+        }
+    }
+
+    func handleRelease(button: SkyworthButton) {
+        longPressWork.removeValue(forKey: button)?.cancel()
+        if longPressFired.remove(button) != nil {
+            activePressGestures.removeValue(forKey: button)
+            return
+        }
+        guard let gestures = activePressGestures.removeValue(forKey: button) else { return }
+
+        if gestures.hasDoubleClick {
+            let work = DispatchWorkItem { [weak self] in
+                guard let self else { return }
+                self.pendingSingleClickWork.removeValue(forKey: button)
+                self.onTrigger?(button, .singleClick)
+            }
+            pendingSingleClickWork[button] = work
+            DispatchQueue.main.asyncAfter(deadline: .now() + doubleClickWindow, execute: work)
+        } else {
+            onTrigger?(button, .singleClick)
+        }
+    }
+
+    func reset() {
+        longPressWork.values.forEach { $0.cancel() }
+        longPressWork.removeAll()
+        pendingSingleClickWork.values.forEach { $0.cancel() }
+        pendingSingleClickWork.removeAll()
+        activePressGestures.removeAll()
+        longPressFired.removeAll()
     }
 }

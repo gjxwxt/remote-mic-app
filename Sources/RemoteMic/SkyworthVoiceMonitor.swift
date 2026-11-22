@@ -15,6 +15,7 @@ final class SkyworthVoiceMonitor {
     var onConnectionChange: ((Bool) -> Void)?
     var onButtonPress: ((RemoteButton) -> Void)?
     var onSkyworthButtonPress: ((SkyworthButton) -> Void)?
+    var onSkyworthButtonRelease: ((SkyworthButton) -> Void)?
     var onSkyworthHeldButtonsChange: ((Set<SkyworthButton>) -> Void)?
     var onStart: (() -> Bool)?
     var onAudio: (([Int16]) -> Void)?
@@ -201,7 +202,9 @@ final class SkyworthVoiceMonitor {
         default:
             return
         }
-        let newlyPressedSkyworth = skyworthButtons.subtracting(heldSkyworthButtons[reportID, default: []])
+        let previousForReport = heldSkyworthButtons[reportID, default: []]
+        let newlyPressedSkyworth = skyworthButtons.subtracting(previousForReport)
+        let newlyReleasedSkyworth = previousForReport.subtracting(skyworthButtons)
         let previousCombined = heldSkyworthButtons.values.reduce(into: Set<SkyworthButton>()) { $0.formUnion($1) }
         heldSkyworthButtons[reportID] = skyworthButtons
         let currentCombined = heldSkyworthButtons.values.reduce(into: Set<SkyworthButton>()) { $0.formUnion($1) }
@@ -210,6 +213,9 @@ final class SkyworthVoiceMonitor {
         }
         for button in newlyPressedSkyworth.sorted(by: { $0.rawValue < $1.rawValue }) {
             onSkyworthButtonPress?(button)
+        }
+        for button in newlyReleasedSkyworth.sorted(by: { $0.rawValue < $1.rawValue }) {
+            onSkyworthButtonRelease?(button)
         }
 
         let newlyPressedLegacy = legacyButtons.subtracting(heldButtons[reportID, default: []])
