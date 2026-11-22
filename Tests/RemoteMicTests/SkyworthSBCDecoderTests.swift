@@ -104,6 +104,18 @@ struct SkyworthSBCDecoderTests {
         #expect(buttons == [.right, .volumeUp, .right])
     }
 
+    @Test @MainActor func keyboardHeaderCannotBecomeAButtonOrRolloverError() {
+        let monitor = SkyworthVoiceMonitor()
+        var buttons: [RemoteButton] = []
+        monitor.onButtonPress = { buttons.append($0) }
+        let modifierOnly: [UInt8] = [1, 0x28, 0, 0, 0, 0, 0, 0, 0]
+        let modifiedArrow: [UInt8] = [1, 1, 0, 0x4F, 0, 0, 0, 0, 0]
+        modifierOnly.withUnsafeBufferPointer { monitor.receiveButtons(reportID: 1, bytes: $0) }
+        #expect(buttons.isEmpty)
+        modifiedArrow.withUnsafeBufferPointer { monitor.receiveButtons(reportID: 1, bytes: $0) }
+        #expect(buttons == [.right])
+    }
+
     @Test @MainActor func interruptionRejectsRemainingPacketsUntilStreamEnds() {
         let monitor = SkyworthVoiceMonitor()
         monitor.log = { _ in }

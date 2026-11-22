@@ -154,7 +154,8 @@ final class SkyworthVoiceMonitor {
                 0x28: .ok, 0x29: .back, 0x2A: .back,
                 0x4F: .right, 0x50: .left, 0x51: .down, 0x52: .up,
             ]
-            let usages = bytes.dropFirst()
+            // Report ID, modifier mask and reserved byte precede six key usages.
+            let usages = bytes.dropFirst(3)
             guard !usages.contains(where: { (1...3).contains($0) }) else { return }
             buttons = Set(usages.compactMap { keys[$0] })
         case (2, 4):

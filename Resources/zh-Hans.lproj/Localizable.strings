@@ -1625,6 +1625,10 @@
 "connection.siri_remote_component.installing" = "正在等待管理员授权…";
 
 "connection.skyworth.connected" = "已连接";
+"button_mapping.skyworth.native_detail" = "普通键由 macOS 处理，自定义映射待适配。逐颗短按遥控器按键，可在下方查看最近识别的按键。";
+"button_mapping.skyworth.last_button" = "最近识别";
+"button_mapping.skyworth.waiting" = "等待按键";
+"button_mapping.skyworth.open_voice" = "检查语音连接";
 "connection.skyworth.disconnected" = "等待 YK-8E00 连接";
 "connection.skyworth.hold" = "按住遥控器语音键说话";
 "connection.skyworth.select_audio" = "在右侧选择 SayAll 虚拟麦克风";

@@ -1626,6 +1626,10 @@
 "connection.siri_remote_component.installing" = "Waiting for administrator authorization…";
 
 "connection.skyworth.connected" = "Connected";
+"button_mapping.skyworth.native_detail" = "macOS handles ordinary buttons. Custom mapping support is pending. Press each remote button to see the latest recognized button below.";
+"button_mapping.skyworth.last_button" = "Last recognized";
+"button_mapping.skyworth.waiting" = "Waiting for a button";
+"button_mapping.skyworth.open_voice" = "Check voice connection";
 "connection.skyworth.disconnected" = "Waiting for YK-8E00";
 "connection.skyworth.hold" = "Hold the remote’s voice button to speak";
 "connection.skyworth.select_audio" = "Select the SayAll virtual microphone";
