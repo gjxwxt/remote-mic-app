@@ -1,6 +1,6 @@
 # YK-8E00 macOS 实验候选
 
-适用分支：`codex/yk8e00-sbc-20261121`。基线：`8f03bdd4f80adc59e2c2c098a55fb3aacc6dff60`。
+当前适用分支：`codex/yk8e00-upstream-sync`。上游基线：`cba59c43163320d9b93a54d9cbcef766b764c84d`。此前 `codex/yk8e00-sbc-20261121`、基线 `8f03bdd4f80adc59e2c2c098a55fb3aacc6dff60` 的记录仅用于追溯。
 
 本机候选接入 YK-8E00 的首次设置、连接状态和实时语音。普通键保留系统原生行为，并可供引导验收。旧款 RC86 和 Windows 不在本候选范围内。共同门槛见 [硬件合同](HardwareCompatibilityContract.md) 和 [音频合同](HardwareVoiceAudioContract.md)。
 
@@ -57,4 +57,4 @@
 - SBC测试使用合成正弦向量及独立FFmpeg参考，覆盖CRC、错布局、逐包顺序、状态回滚和重置。
 - 传输测试覆盖重复包保序、启动拒绝、同一按键不重复计数、中断后余包丢弃及停流后重启。真实 IOHID 回调、遥控器按键时序和豆包上屏需要实机检查。
 
-此前独立内存实验中，用户确认同一设备语音清楚，豆包出字成功；该结果来自录后回放，**不属于本候选SayAll的实机验收**。
+此前独立内存实验中，用户确认同一设备语音清楚，豆包出字成功。此后本机 build 176 的真实引导中有四次语音尝试达到文字门槛，也出现过 CoreAudio 改绑输出后的 `playback_not_ready`。上述结果属于旧基线，更新后的候选仍须重新核对真实豆包上屏、首尾字和短间隔会话。
