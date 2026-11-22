@@ -139,6 +139,11 @@ enum SettingsScreenshotRenderer {
 
         let settings = AppSettings(defaults: defaults)
         settings.applicationLanguage = language
+        if let source = ProcessInfo.processInfo.environment[
+            "REMOTE_MIC_SETTINGS_SCREENSHOT_CONTROL_SOURCE"
+        ].flatMap(OnboardingControlSource.init(rawValue:)) {
+            settings.setOnboardingControlSource(source)
+        }
         settings.completeOnboarding()
         if let modelName = ProcessInfo.processInfo.environment[
             "REMOTE_MIC_SETTINGS_SCREENSHOT_REMOTE_MODEL"

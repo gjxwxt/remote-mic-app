@@ -1544,7 +1544,7 @@ final class AppSettings: ObservableObject {
         onboardingControlSource = source
         onboardingControlMethod = source.legacyControlMethod
         switch source {
-        case .xiaomiRemote, .siriRemote, .chromecastRemote:
+        case .xiaomiRemote, .siriRemote, .chromecastRemote, .skyworthRemote:
             onboardingRemoteAvailability = .hasRemote
         case .appleCompanion, .webRemote:
             onboardingRemoteAvailability = .noRemote

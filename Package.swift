@@ -14,6 +14,7 @@ let privatePlatformPackagePath = ProcessInfo.processInfo.environment[
 ]
 var remoteMicDependencies: [Target.Dependency] = [
     "AudioExceptionGuard",
+    "SBCCodec",
     "AppleRemoteSupport",
     "AppleRemoteAudioCore",
     "AppleRemoteHCIProtocol",
@@ -651,6 +652,12 @@ let package = Package(
             linkerSettings: remoteMicLinkerSettings + [
                 .linkedFramework("Network"),
             ]
+        ),
+        .target(
+            name: "SBCCodec",
+            path: "Sources/SBCCodec",
+            exclude: ["LICENSE", "README.md"],
+            publicHeadersPath: "include"
         ),
         .target(
             name: "AudioExceptionGuard",

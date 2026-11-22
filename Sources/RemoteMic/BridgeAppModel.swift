@@ -11,6 +11,7 @@ enum MobileVoiceSource: Equatable {
     case nearbyWatch
     case web
     case macMicrophone
+    case skyworthRemote
 
     @discardableResult
     func updateVoiceTrigger(_ action: () -> Bool) -> Bool {
@@ -25,6 +26,7 @@ enum MobileVoiceSource: Equatable {
         case .nearbyWatch: return "watch"
         case .web: return "web"
         case .macMicrophone: return "mac_microphone"
+        case .skyworthRemote: return "skyworth_remote"
         }
     }
 }
@@ -360,7 +362,7 @@ enum VoiceKeySessionPreservationPolicy {
 }
 
 struct CommandVoiceActivationAudioBuffer {
-    private let maximumSampleCount: Int
+    let maximumSampleCount: Int
     private var samples: [Int16] = []
     private(set) var isWaiting = false
 
@@ -718,6 +720,8 @@ final class BridgeAppModel: NSObject, ObservableObject, XiaomiBluetoothBridgeDel
     @Published private(set) var isAudioOutputReady = false
     @Published private(set) var hasReceivedCurrentVoiceSamples = false
     @Published private(set) var activeVoiceSource: UsageEventSource?
+    @Published private(set) var skyworthRemoteConnected = false
+    @Published private(set) var lastSkyworthRemoteButtonPress: RemoteButton?
     @Published private(set) var lastMobileRemoteButtonObservation: MobileRemoteButtonObservation?
     @Published private(set) var isPhoneRemoteConnectionEnabled = false
     @Published private(set) var isPhoneRemoteConnected = false
@@ -746,6 +750,46 @@ final class BridgeAppModel: NSObject, ObservableObject, XiaomiBluetoothBridgeDel
         qos: .utility
     )
     private let audioOutput = VirtualAudioOutput()
+    private lazy var skyworthVoiceMonitor: SkyworthVoiceMonitor = {
+        let monitor = SkyworthVoiceMonitor()
+        monitor.onConnectionChange = { [weak self] connected in
+            guard let self else { return }
+            self.skyworthRemoteConnected = connected
+            if !connected {
+                self.lastSkyworthRemoteButtonPress = nil
+                self.releaseVirtualAudioOutputIfUnused(reason: "skyworth_disconnected")
+            } else if self.skyworthUsesSelectedVirtualOutput {
+                self.resumeVirtualAudioOutputIfNeeded(reason: "skyworth_connected")
+            }
+        }
+        monitor.onButtonPress = { [weak self] button in
+            self?.lastSkyworthRemoteButtonPress = button
+        }
+        monitor.onStart = { [weak self] in
+            guard let self, self.started, !self.systemAudioSuspensionState.isSuspended,
+                  self.skyworthUsesSelectedVirtualOutput, self.skyworthFnHoldConfigured,
+                  !self.isStreaming, !self.voiceKeyLatch.isHeld,
+                  !self.bluetoothVoiceActive, self.appleRemoteVoiceDevices.isEmpty,
+                  !self.appleRemoteVoiceStopping, !self.chromecastVoiceActive,
+                  !self.chromecastVoiceStopping, self.activeMobileVoiceSource == nil,
+                  !self.macMicrophoneState.isActive else { return false }
+            var accepted = false
+            self.startPhoneVoiceAfterAudioReady(source: .skyworthRemote) { accepted = $0 == .started }
+            return accepted
+        }
+        monitor.onAudio = { [weak self] in self?.receivePhoneAudio($0, source: .skyworthRemote) }
+        monitor.onStop = { [weak self] reason in
+            guard let self, self.activeMobileVoiceSource == .skyworthRemote else { return }
+            if reason != "release_unobserved", self.pendingMobileVoiceStartSource == .skyworthRemote {
+                self.pendingMobileVoiceStartSource = nil
+                self.pendingMobileVoiceAudio.cancel()
+                self.pendingMobileVoiceStopReason = nil
+            }
+            self.stopPhoneVoice(source: .skyworthRemote, reason: reason)
+        }
+        return monitor
+    }()
+
     private let diagnosticLogUploader: DiagnosticLogUploader
     private let externalActionSender: (
         ButtonAction,
@@ -755,6 +799,17 @@ final class BridgeAppModel: NSObject, ObservableObject, XiaomiBluetoothBridgeDel
     ) -> Bool
     private let customApplicationURLResolver: (String) -> URL?
     private var recordingPlayback: AVAudioPlayer?
+
+    var skyworthFnHoldConfigured: Bool {
+        settings.voiceKeyMode == .function && !settings.voiceFnTapModeEnabled
+    }
+
+    var skyworthUsesSelectedVirtualOutput: Bool {
+        audioDevices.contains { device in
+            device.uid == settings.selectedAudioDeviceUID &&
+                OnboardingAudioSelectionPolicy.isSupportedDevice(uid: device.uid, name: device.name)
+        }
+    }
 
     func isOnboardingControlSourceConnected(_ source: OnboardingControlSource) -> Bool {
         isOnboardingControlSourceConnected(source, xiaomiModel: nil)
@@ -780,6 +835,8 @@ final class BridgeAppModel: NSObject, ObservableObject, XiaomiBluetoothBridgeDel
             return !connectedAppleRemoteProfileIDs.isEmpty
         case .chromecastRemote:
             return !connectedChromecastProfileIDs.isEmpty
+        case .skyworthRemote:
+            return skyworthRemoteConnected
         case .appleCompanion:
             return isPhoneRemoteConnected || isWatchRemoteConnected
         case .webRemote:
@@ -822,6 +879,7 @@ final class BridgeAppModel: NSObject, ObservableObject, XiaomiBluetoothBridgeDel
     }
 
     var activePhysicalVoiceControlSource: OnboardingControlSource? {
+        if activeMobileVoiceSource == .skyworthRemote { return .skyworthRemote }
         if bluetoothVoiceActive { return .xiaomiRemote }
         if !appleRemoteVoiceDevices.isEmpty || appleRemoteVoiceStopping { return .siriRemote }
         if chromecastVoiceActive || chromecastVoiceStopping { return .chromecastRemote }
@@ -996,7 +1054,7 @@ final class BridgeAppModel: NSObject, ObservableObject, XiaomiBluetoothBridgeDel
     private var pendingMobileVoiceAudio = CommandVoiceActivationAudioBuffer(
         maximumSampleCount: 32_000
     )
-    private var pendingMobileVoiceStopRequested = false
+    private var pendingMobileVoiceStopReason: String?
     private var pendingMobileVoiceRestartCompletion: ((RemoteVoiceStartResult) -> Void)?
     private var mobileVoiceNoAudioRecoveryTimer: DispatchSourceTimer?
     private var activeMobileVoiceSource: MobileVoiceSource? {
@@ -1795,6 +1853,7 @@ final class BridgeAppModel: NSObject, ObservableObject, XiaomiBluetoothBridgeDel
     }
 
     func stop() {
+        skyworthVoiceMonitor.stop(reason: "app_stop")
         if hidMonitorRebuildWorkItem != nil {
             AppLogger.shared.write("HID MONITOR REBUILD phase=cancelled reason=app_stop")
         }
@@ -1910,7 +1969,7 @@ final class BridgeAppModel: NSObject, ObservableObject, XiaomiBluetoothBridgeDel
         pendingMobileVoiceRestartCompletion = nil
         pendingMobileVoiceStartSource = nil
         pendingMobileVoiceAudio.cancel()
-        pendingMobileVoiceStopRequested = false
+        pendingMobileVoiceStopReason = nil
         if cancelledPendingRestart {
             completion?(.unavailable)
         }
@@ -3307,6 +3366,12 @@ final class BridgeAppModel: NSObject, ObservableObject, XiaomiBluetoothBridgeDel
                 "test_tone=\(isPlayingTestTone) audio_ready=\(isAudioOutputReady)"
         )
         guard started, changed else { return }
+        if systemAudioSuspensionState.isSuspended {
+            skyworthVoiceMonitor.stop(reason: "system_suspended")
+        } else if HIDRemoteMonitor.isInputMonitoringGranted, KeyboardInjector.isAccessibilityTrusted {
+            skyworthVoiceMonitor.start()
+        }
+
         if event.isSuspending { macMicrophoneSession.stop(failure: .interrupted) }
         setBluetoothSystemSuspended(
             systemAudioSuspensionState.isSuspended,
@@ -3944,6 +4009,13 @@ final class BridgeAppModel: NSObject, ObservableObject, XiaomiBluetoothBridgeDel
         }
         let permissionSnapshot = HIDPermissionSnapshot.current
         appliedHIDPermissionSnapshot = permissionSnapshot
+        if started, !systemAudioSuspensionState.isSuspended,
+           permissionSnapshot.inputMonitoringGranted, permissionSnapshot.accessibilityGranted {
+            skyworthVoiceMonitor.start()
+        } else {
+            skyworthVoiceMonitor.stop(reason: "permission_or_lifecycle")
+        }
+
         if !settings.customMappingEnabled || !permissionSnapshot.accessibilityGranted ||
             !permissionSnapshot.inputMonitoringGranted {
             chromecastAppSwitcher.cancel(reason: "mapping_or_permission_unavailable")
@@ -9223,6 +9295,9 @@ final class BridgeAppModel: NSObject, ObservableObject, XiaomiBluetoothBridgeDel
         )
         switch source {
         case .macMicrophone: break
+        case .skyworthRemote:
+            skyworthVoiceMonitor.interrupt(reason: "target_interrupted")
+            return
         case .web:
             webRemoteClient.notifyVoiceEnded(detail: detail)
         case .nearbyPhone, .nearbyWatch:
@@ -9454,7 +9529,7 @@ final class BridgeAppModel: NSObject, ObservableObject, XiaomiBluetoothBridgeDel
         source: MobileVoiceSource,
         completion: @escaping (RemoteVoiceStartResult) -> Void
     ) {
-        guard (source == .web || source == .macMicrophone) || membershipFeature.canStartCompanionConnection else {
+        guard (source == .web || source == .macMicrophone || source == .skyworthRemote) || membershipFeature.canStartCompanionConnection else {
             disablePhoneRemoteConnection()
             completion(.unavailable)
             return
@@ -9484,52 +9559,68 @@ final class BridgeAppModel: NSObject, ObservableObject, XiaomiBluetoothBridgeDel
         completion: @escaping (RemoteVoiceStartResult) -> Void
     ) {
         let outputReadyAtStart = audioOutput.isReadyForTestTone
-        if !outputReadyAtStart {
+        // The loopback drops samples written before the input tool opens its
+        // reader. Use the same lead time established for the Chromecast path.
+        let readerReadyDeadline = DispatchTime.now() + (source == .skyworthRemote ? 0.5 : 0)
+        let needsStartupBuffer = !outputReadyAtStart || source == .skyworthRemote
+        if needsStartupBuffer {
             pendingMobileVoiceStartSource = source
             pendingMobileVoiceAudio.begin()
         }
         let result = startPhoneVoice(source: source)
         completion(result)
-        guard result == .started, !outputReadyAtStart else {
+        guard result == .started, needsStartupBuffer else {
             if result != .started {
                 pendingMobileVoiceStartSource = nil
                 pendingMobileVoiceAudio.cancel()
-                pendingMobileVoiceStopRequested = false
+                pendingMobileVoiceStopReason = nil
             }
             return
         }
-        AppLogger.shared.write(
-            "SYSTEM AUDIO voice_start_recovery configured=pending " +
-                "suspended=\(systemAudioSuspensionState.isSuspended) " +
-                "reasons=\(systemAudioSuspensionState.diagnostic)"
-        )
+        if !outputReadyAtStart {
+            AppLogger.shared.write(
+                "SYSTEM AUDIO voice_start_recovery configured=pending " +
+                    "suspended=\(systemAudioSuspensionState.isSuspended) " +
+                    "reasons=\(systemAudioSuspensionState.diagnostic)"
+            )
+        }
+        let operationID = activeMobileVoiceOperationID
         ensureVirtualAudioOutputReady(reason: "mobile_voice_start") { [weak self] ready in
-            guard let self,
-                  self.pendingMobileVoiceStartSource == source
-            else { return }
-            self.pendingMobileVoiceStartSource = nil
-            let stopRequested = self.pendingMobileVoiceStopRequested
-            self.pendingMobileVoiceStopRequested = false
-            let bufferedAudio = self.pendingMobileVoiceAudio.drain()
-            guard ready else {
-                self.pendingMobileVoiceAudio.cancel()
-                if stopRequested {
-                    self.stopPhoneVoice(source: source)
-                } else {
-                    self.stopPhoneVoice(source: source)
+            if ready, DispatchTime.now() < readerReadyDeadline {
+                DispatchQueue.main.asyncAfter(deadline: readerReadyDeadline) { [weak self] in
+                    self?.finishBufferedMobileVoiceStart(source: source, operationID: operationID, ready: true)
                 }
-                return
+            } else {
+                self?.finishBufferedMobileVoiceStart(source: source, operationID: operationID, ready: ready)
             }
-            if !bufferedAudio.isEmpty {
-                AppLogger.shared.write(
-                    "MOBILE VOICE flush_after_configuration source=\(source.logName) " +
-                        "samples=\(bufferedAudio.count)"
-                )
-                self.receivePhoneAudio(bufferedAudio, source: source)
-            }
-            if stopRequested {
-                self.stopPhoneVoice(source: source)
-            }
+        }
+    }
+
+    private func finishBufferedMobileVoiceStart(
+        source: MobileVoiceSource,
+        operationID: String?,
+        ready: Bool
+    ) {
+        guard activeMobileVoiceOperationID == operationID,
+              pendingMobileVoiceStartSource == source else { return }
+        pendingMobileVoiceStartSource = nil
+        let stopReason = pendingMobileVoiceStopReason
+        pendingMobileVoiceStopReason = nil
+        guard ready else {
+            pendingMobileVoiceAudio.cancel()
+            stopPhoneVoice(source: source, reason: stopReason ?? "audio_unavailable")
+            return
+        }
+        let bufferedAudio = pendingMobileVoiceAudio.drain()
+        if !bufferedAudio.isEmpty {
+            AppLogger.shared.write(
+                "MOBILE VOICE flush_after_configuration source=\(source.logName) " +
+                    "samples=\(bufferedAudio.count)"
+            )
+            receivePhoneAudio(bufferedAudio, source: source)
+        }
+        if let stopReason, stoppingMobileVoiceSource != source {
+            stopPhoneVoice(source: source, reason: stopReason)
         }
     }
 
@@ -9542,14 +9633,14 @@ final class BridgeAppModel: NSObject, ObservableObject, XiaomiBluetoothBridgeDel
         }
         if pendingMobileVoiceStartSource == source {
             if activeMobileVoiceSource == source {
-                pendingMobileVoiceStopRequested = true
+                pendingMobileVoiceStopReason = reason
                 AppLogger.shared.write(
                     "MOBILE VOICE stop_deferred_until_audio_ready source=\(source.logName)"
                 )
             } else {
                 pendingMobileVoiceStartSource = nil
                 pendingMobileVoiceAudio.cancel()
-                pendingMobileVoiceStopRequested = false
+                pendingMobileVoiceStopReason = nil
                 cancelMobileVoiceNoAudioRecoveryTimer()
                 mobileVoiceAudioReceivedBatchCount = 0
                 AppLogger.shared.write(
@@ -9775,7 +9866,8 @@ final class BridgeAppModel: NSObject, ObservableObject, XiaomiBluetoothBridgeDel
 
     private func shouldKeepVirtualAudioActive(allowingIdleBridgeRelease: Bool) -> Bool {
         VirtualAudioConnectionLifecyclePolicy.shouldBeActive(
-            readyBluetoothBridgeCount: readyBluetoothBridgeCount,
+            readyBluetoothBridgeCount: readyBluetoothBridgeCount +
+                (skyworthRemoteConnected && skyworthUsesSelectedVirtualOutput ? 1 : 0),
             bluetoothVoiceActive: bluetoothVoiceActive,
             mobileVoiceActive: macMicrophoneEnabled || activeMobileVoiceSource != nil ||
                 !appleRemoteVoiceDevices.isEmpty || appleRemoteVoiceStopping,
@@ -10018,7 +10110,7 @@ final class BridgeAppModel: NSObject, ObservableObject, XiaomiBluetoothBridgeDel
     }
 
     private func receivePhoneAudio(_ samples: [Int16], source: MobileVoiceSource) {
-        guard (source == .web || source == .macMicrophone) || membershipFeature.canStartCompanionConnection else {
+        guard (source == .web || source == .macMicrophone || source == .skyworthRemote) || membershipFeature.canStartCompanionConnection else {
             disablePhoneRemoteConnection()
             return
         }
@@ -10035,6 +10127,11 @@ final class BridgeAppModel: NSObject, ObservableObject, XiaomiBluetoothBridgeDel
             return
         }
         mobileVoiceAudioReceivedBatchCount += 1
+        if source == .skyworthRemote, pendingMobileVoiceStartSource == source,
+           pendingMobileVoiceAudio.bufferedSampleCount + samples.count > pendingMobileVoiceAudio.maximumSampleCount {
+            skyworthVoiceMonitor.interrupt(reason: "audio_start_buffer_limit")
+            return
+        }
         if pendingMobileVoiceStartSource == source,
            pendingMobileVoiceAudio.appendIfWaiting(samples) {
             AppLogger.shared.write(
@@ -10060,6 +10157,7 @@ final class BridgeAppModel: NSObject, ObservableObject, XiaomiBluetoothBridgeDel
         if !accepted {
             mobileVoiceAudioEnqueueFailureCount += 1
             if source == .macMicrophone { macMicrophoneSession.stop(failure: .capture) }
+            if source == .skyworthRemote { skyworthVoiceMonitor.interrupt(reason: "audio_enqueue_failed") }
         }
         if mobileVoiceAudioBatchCount == 1 || mobileVoiceAudioBatchCount.isMultiple(of: 20) {
             AppLogger.shared.write(
@@ -10388,6 +10486,7 @@ final class BridgeAppModel: NSObject, ObservableObject, XiaomiBluetoothBridgeDel
         case .nearbyPhone, .nearbyWatch: return .nearbyPhone
         case .web: return .webRemote
         case .macMicrophone: return .unknown
+        case .skyworthRemote: return .bluetoothRemote
         case nil: return .unknown
         }
     }

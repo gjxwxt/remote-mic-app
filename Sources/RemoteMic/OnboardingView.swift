@@ -384,6 +384,23 @@ struct OnboardingView: View {
                 testedControlButtons.insert(observation.button)
             }
         }
+        .onChange(of: model.skyworthRemoteConnected) { connected in
+            if connected {
+                routeConnectedPhysicalRemoteIfNeeded()
+            } else if settings.onboardingControlSource == .skyworthRemote {
+                observedRemoteButtons.removeAll()
+                testedControlButtons.removeAll()
+            }
+        }
+        .onReceive(model.$lastSkyworthRemoteButtonPress.dropFirst().compactMap { $0 }) { button in
+            guard settings.onboardingControlSource == .skyworthRemote,
+                  model.skyworthRemoteConnected else { return }
+            if settings.onboardingStep == .remote {
+                recordRemoteControlButtons([button], source: "skyworth_remote")
+            } else if settings.onboardingStep == .controls {
+                testedControlButtons.insert(button)
+            }
+        }
         .onReceive(model.$isStreaming) { isStreaming in
             let action = OnboardingVoiceStreamPolicy.action(
                 isStreaming: isStreaming,
@@ -865,7 +882,7 @@ struct OnboardingView: View {
 
     private var availablePhysicalControlSources: [OnboardingControlSource] {
         visibleControlSources.filter {
-            [.xiaomiRemote, .siriRemote].contains($0)
+            [.xiaomiRemote, .siriRemote, .skyworthRemote].contains($0)
         }
     }
 
@@ -882,6 +899,8 @@ struct OnboardingView: View {
         case let .apple(generation):
             isSelected = settings.onboardingControlSource == .siriRemote &&
                 settings.onboardingAppleRemoteGeneration == generation
+        case .skyworth:
+            isSelected = settings.onboardingControlSource == .skyworthRemote
         }
         return onboardingActionButton(id: actionID) {
             switch card {
@@ -889,6 +908,8 @@ struct OnboardingView: View {
                 selectXiaomiRemote(model)
             case let .apple(generation):
                 selectAppleRemote(generation)
+            case .skyworth:
+                selectControlSource(.skyworthRemote)
             }
         } label: {
             HStack(alignment: .center, spacing: 11) {
@@ -942,6 +963,7 @@ struct OnboardingView: View {
         switch card {
         case let .xiaomi(model): return model.titleKey
         case let .apple(generation): return generation.titleKey
+        case .skyworth: return OnboardingControlSource.skyworthRemote.titleKey
         }
     }
 
@@ -949,6 +971,7 @@ struct OnboardingView: View {
         switch card {
         case let .xiaomi(model): return model.detailKey
         case .apple: return OnboardingControlSource.siriRemote.detailKey
+        case .skyworth: return OnboardingControlSource.skyworthRemote.detailKey
         }
     }
 
@@ -978,6 +1001,11 @@ struct OnboardingView: View {
                     .frame(width: compact ? 34 : 40, height: compact ? 34 : 40)
                     .background(Color.accentColor.opacity(0.10), in: RoundedRectangle(cornerRadius: 10))
             }
+        case .skyworth:
+            Image(systemName: controlSourceIcon(.skyworthRemote))
+                .font(.system(size: 19, weight: .medium))
+                .foregroundStyle(Color.accentColor)
+                .frame(width: 36, height: 60)
         case .apple:
             #if SAYALL_SIRI_REMOTE_ENABLED && canImport(SayAllSiriRemote)
             SiriRemoteConnectionPhoto()
@@ -2602,6 +2630,14 @@ struct OnboardingView: View {
                     "onboarding.remote.chromecast_pairing.second",
                 ]
             )
+        case .skyworthRemote:
+            return PhysicalRemotePairingGuide(
+                title: "onboarding.remote.skyworth_pairing.title",
+                steps: [
+                    "onboarding.remote.skyworth_pairing.first",
+                    "onboarding.remote.skyworth_pairing.second",
+                ]
+            )
         case .xiaomiRemote:
             // 只有 2 Pro 有底部白灯；小米蓝牙遥控器 2 保留唤醒步骤，但不提示白灯。
             // 型号未知时也使用不带白灯的短文案，避免把 2 当成 2 Pro。
@@ -2635,6 +2671,8 @@ struct OnboardingView: View {
             return "onboarding.controls.siri.detail"
         case .chromecastRemote:
             return "onboarding.controls.chromecast.detail"
+        case .skyworthRemote:
+            return "onboarding.controls.skyworth.detail"
         case .appleCompanion:
             return "onboarding.controls.apple_companion.detail"
         case .webRemote:
@@ -2664,6 +2702,8 @@ struct OnboardingView: View {
                 .power, .up, .left, .ok, .right, .down, .back,
                 .home, .volumeUp, .volumeDown, .mute, .youtube, .netflix, .input,
             ]
+        case .skyworthRemote:
+            return [.up, .left, .ok, .right, .down, .back, .volumeUp, .volumeDown, .home]
         case .appleCompanion, .webRemote, .unselected:
             return nil
         }
@@ -2813,6 +2853,8 @@ struct OnboardingView: View {
 
     static func remoteNotFoundRecoveryDetailKey(for source: OnboardingControlSource) -> String {
         switch source {
+        case .skyworthRemote:
+            return "onboarding.remote.skyworth_pairing.first"
         case .xiaomiRemote, .siriRemote, .chromecastRemote:
             return "onboarding.recovery.remote.not_found.physical_detail"
         case .appleCompanion:
@@ -2915,7 +2957,7 @@ struct OnboardingView: View {
     @ViewBuilder
     private var selectedControlSourceIllustration: some View {
         switch settings.onboardingControlSource {
-        case .xiaomiRemote, .siriRemote, .chromecastRemote:
+        case .xiaomiRemote, .siriRemote, .chromecastRemote, .skyworthRemote:
             remoteIllustration
         case .appleCompanion, .webRemote:
             controlMethodIllustration
@@ -3186,7 +3228,11 @@ struct OnboardingView: View {
         case .controls:
             sidePanel(titleKey: "onboarding.side.controls") {
                 sideCheck("onboarding.side.three_buttons", isComplete: testedControlButtons.count >= 3)
-                sideCheck("onboarding.side.mapping_enabled", isComplete: settings.customMappingEnabled)
+                if settings.onboardingControlSource == .skyworthRemote {
+                    sideCheck("onboarding.side.skyworth_native_controls", isComplete: selectedControlConnected)
+                } else {
+                    sideCheck("onboarding.side.mapping_enabled", isComplete: settings.customMappingEnabled)
+                }
             }
         default:
             EmptyView()
@@ -3501,7 +3547,9 @@ struct OnboardingView: View {
     }
 
     private var visibleVoiceTools: [OnboardingVoiceTool] {
-        OnboardingVoiceToolVisibilityPolicy.visibleTools(availability: voiceToolAvailability)
+        let tools = OnboardingVoiceToolVisibilityPolicy.visibleTools(availability: voiceToolAvailability)
+        guard settings.onboardingControlSource == .skyworthRemote else { return tools }
+        return tools.filter { $0.supportsHoldVoiceRecording }
     }
 
     private var allRecognizedVoiceToolsUnavailable: Bool {
@@ -3667,6 +3715,9 @@ struct OnboardingView: View {
     }
 
     private var selectedControlConnected: Bool {
+        if settings.onboardingControlSource == .skyworthRemote {
+            return model.skyworthRemoteConnected
+        }
         if settings.onboardingControlMethod == .physicalRemote {
             return OnboardingFlowPolicy.isPhysicalRemoteRecognized(
                 at: settings.onboardingStep,
@@ -3969,7 +4020,7 @@ struct OnboardingView: View {
     private func controlSourceIcon(_ source: OnboardingControlSource) -> String {
         switch source {
         case .xiaomiRemote: return "appletvremote.gen4.fill"
-        case .siriRemote: return "appletvremote.gen4.fill"
+        case .siriRemote, .skyworthRemote: return "appletvremote.gen4.fill"
         case .chromecastRemote: return "tv.and.hifispeaker.fill"
         case .appleCompanion: return "iphone.and.arrow.forward"
         case .webRemote: return "safari.fill"
@@ -4455,7 +4506,7 @@ struct OnboardingView: View {
         AppLogger.shared.write("ONBOARDING SECURE_INPUT phase=recovery_requested")
         secureInputWaitStartedAtUptime = ProcessInfo.processInfo.systemUptime
         switch settings.onboardingControlSource {
-        case .xiaomiRemote, .siriRemote:
+        case .xiaomiRemote, .siriRemote, .skyworthRemote:
             model.applyHIDSettings()
         case .chromecastRemote:
             prepareSelectedControlConnection()
@@ -4711,7 +4762,7 @@ struct OnboardingView: View {
         case .siriRemote:
             model.enableSiriRemoteForOnboarding()
             prepareSelectedControlConnection()
-        case .xiaomiRemote, .chromecastRemote, .unselected:
+        case .xiaomiRemote, .chromecastRemote, .skyworthRemote, .unselected:
             prepareSelectedControlConnection()
         }
     }
@@ -5250,7 +5301,7 @@ struct OnboardingView: View {
         switch settings.onboardingControlSource {
         case .xiaomiRemote:
             prepareSelectedXiaomiRemoteConnection()
-        case .siriRemote:
+        case .siriRemote, .skyworthRemote:
             model.applyHIDSettings()
         case .chromecastRemote:
             #if SAYALL_CHROMECAST_ENABLED
@@ -5340,6 +5391,11 @@ struct OnboardingView: View {
     }
 
     private func selectedControlAcceptsVoice(_ source: UsageEventSource?) -> Bool {
+        let physicalSource = model.activePhysicalVoiceControlSource
+        if physicalSource == .skyworthRemote || settings.onboardingControlSource == .skyworthRemote {
+            return source == .bluetoothRemote && physicalSource == .skyworthRemote &&
+                settings.onboardingControlSource == .skyworthRemote
+        }
         switch settings.onboardingControlSource {
         case .xiaomiRemote:
             guard source == .bluetoothRemote,
@@ -5356,7 +5412,7 @@ struct OnboardingView: View {
             return source == .nearbyPhone
         case .webRemote:
             return source == .webRemote
-        case .unselected:
+        case .skyworthRemote, .unselected:
             return false
         }
     }
@@ -5375,7 +5431,7 @@ struct OnboardingView: View {
             return profileModel == generation.model
         case .chromecastRemote:
             return profileModel.isChromecastRemote
-        case .appleCompanion, .webRemote, .unselected:
+        case .skyworthRemote, .appleCompanion, .webRemote, .unselected:
             return false
         }
     }
@@ -5396,7 +5452,8 @@ struct OnboardingView: View {
             return
         }
         if settings.onboardingStep == .permissions {
-            if settings.onboardingControlMethod == .physicalRemote {
+            if settings.onboardingControlMethod == .physicalRemote,
+               settings.onboardingControlSource != .skyworthRemote {
                 settings.customMappingEnabled = true
             }
         }

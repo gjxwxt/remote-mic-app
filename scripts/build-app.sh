@@ -862,6 +862,8 @@ if [[ "$RELEASE_VARIANT" == "intel" ]]; then
 fi
 ditto --norsrc --noextattr --noqtn --noacl \
   "$ROOT/LICENSE.md" "$APP_DIR/Contents/Resources/LICENSE.md"
+ditto --norsrc --noextattr --noqtn --noacl \
+  "$ROOT/Sources/SBCCodec/LICENSE" "$APP_DIR/Contents/Resources/SBC-LICENSE.txt"
 for document in README TECHNICAL TROUBLESHOOTING COPYRIGHT LOGO-LICENSE; do
   ditto --norsrc --noextattr --noqtn --noacl \
     "$ROOT/$document.en.md" "$APP_DIR/Contents/Resources/$document.md"

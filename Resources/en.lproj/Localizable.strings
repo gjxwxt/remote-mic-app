@@ -1624,3 +1624,20 @@
 "connection.siri_remote_component.retry_detail" = "The previous installation did not finish. Retry is available; cancelling will not prompt again automatically.";
 
 "connection.siri_remote_component.installing" = "Waiting for administrator authorization…";
+
+"connection.skyworth.connected" = "Connected";
+"connection.skyworth.disconnected" = "Waiting for YK-8E00";
+"connection.skyworth.hold" = "Hold the remote’s voice button to speak";
+"connection.skyworth.select_audio" = "Select the SayAll virtual microphone";
+"connection.skyworth.configure_fn" = "Set SayAll to hold Fn";
+"connection.skyworth.use_fn" = "Use Hold Fn";
+"connection.skyworth.open_bluetooth" = "Open Bluetooth Settings";
+
+"onboarding.control_source.skyworth_remote.title" = "Skyworth YK-8E00";
+"onboarding.control_source.skyworth_remote.detail" = "Hold the voice button to speak.";
+"onboarding.remote.skyworth_pairing.title" = "Connect Skyworth YK-8E00";
+"onboarding.remote.skyworth_pairing.first" = "Put the remote in pairing mode and select Skyworth in Bluetooth Settings on your Mac";
+"onboarding.remote.skyworth_pairing.second" = "Once connected, press an arrow button to check that SayAll receives it";
+"onboarding.controls.skyworth.detail" = "Press three different arrow buttons, such as Up, Left, and Right.";
+
+"onboarding.side.skyworth_native_controls" = "Uses macOS button actions";

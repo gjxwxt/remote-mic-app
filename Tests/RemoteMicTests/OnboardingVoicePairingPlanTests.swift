@@ -210,11 +210,24 @@ struct OnboardingVoicePairingPlanTests {
         #expect(resumed.voiceFnTapModeEnabled)
     }
 
-    @Test func publicBuildOnlyOffersXiaomiRemote() {
+    @Test func publicBuildOffersBothPublicRemoteAdapters() {
+        let sources = OnboardingBuildCapabilities.availableControlSources
         #if SAYALL_SIRI_REMOTE_ENABLED || SAYALL_CHROMECAST_ENABLED || SAYALL_MAC_REMOTE_ENABLED
-        #expect(OnboardingBuildCapabilities.availableControlSources.contains(.xiaomiRemote))
+        #expect(sources.starts(with: [.xiaomiRemote, .skyworthRemote]))
         #else
-        #expect(OnboardingBuildCapabilities.availableControlSources == [.xiaomiRemote])
+        #expect(sources == [.xiaomiRemote, .skyworthRemote])
         #endif
+    }
+
+    @Test func skyworthGuideRequiresHoldFn() throws {
+        let plan = try #require(OnboardingVoicePairingPlan.resolve(
+            tool: .doubao, controlSource: .skyworthRemote, userBinding: nil
+        ))
+        #expect(plan.binding.shortcut == .function)
+        #expect(plan.binding.gestureMode == .hold)
+        #expect(!plan.fnTapModeEnabled)
+        #expect(OnboardingVoicePairingPlan.resolve(
+            tool: .typeless, controlSource: .skyworthRemote, userBinding: nil
+        ) == nil)
     }
 }

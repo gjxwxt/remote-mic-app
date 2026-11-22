@@ -1623,3 +1623,20 @@
 "connection.siri_remote_component.retry_detail" = "上次安装未完成。可以重试；取消后不会自动重复弹窗。";
 
 "connection.siri_remote_component.installing" = "正在等待管理员授权…";
+
+"connection.skyworth.connected" = "已连接";
+"connection.skyworth.disconnected" = "等待 YK-8E00 连接";
+"connection.skyworth.hold" = "按住遥控器语音键说话";
+"connection.skyworth.select_audio" = "在右侧选择 SayAll 虚拟麦克风";
+"connection.skyworth.configure_fn" = "在 SayAll 使用长按 Fn";
+"connection.skyworth.use_fn" = "使用长按 Fn";
+"connection.skyworth.open_bluetooth" = "打开蓝牙设置";
+
+"onboarding.control_source.skyworth_remote.title" = "创维 YK-8E00";
+"onboarding.control_source.skyworth_remote.detail" = "按住语音键说话。";
+"onboarding.remote.skyworth_pairing.title" = "连接创维 YK-8E00";
+"onboarding.remote.skyworth_pairing.first" = "让遥控器进入配对状态，在 Mac 的蓝牙设置中选择 Skyworth";
+"onboarding.remote.skyworth_pairing.second" = "连接后，短按一个方向键，确认 SayAll 能收到按键";
+"onboarding.controls.skyworth.detail" = "依次按三个不同的方向键，例如上、左、右。";
+
+"onboarding.side.skyworth_native_controls" = "使用 macOS 原生按键";

@@ -357,6 +357,7 @@ enum OnboardingVoiceBindingPreference: String, Codable {
 enum OnboardingControlSource: String, CaseIterable, Codable, Identifiable {
     case unselected
     case xiaomiRemote = "xiaomi_remote"
+    case skyworthRemote = "skyworth_remote"
     case siriRemote = "siri_remote"
     case chromecastRemote = "chromecast_remote"
     case appleCompanion = "apple_companion"
@@ -371,7 +372,7 @@ enum OnboardingControlSource: String, CaseIterable, Codable, Identifiable {
         switch self {
         case .unselected:
             return []
-        case .xiaomiRemote, .siriRemote:
+        case .xiaomiRemote, .skyworthRemote, .siriRemote:
             return [.hold]
         case .chromecastRemote, .appleCompanion, .webRemote:
             return [.hold, .toggle]
@@ -380,7 +381,7 @@ enum OnboardingControlSource: String, CaseIterable, Codable, Identifiable {
 
     var legacyControlMethod: OnboardingControlMethod {
         switch self {
-        case .xiaomiRemote, .siriRemote, .chromecastRemote:
+        case .xiaomiRemote, .skyworthRemote, .siriRemote, .chromecastRemote:
             return .physicalRemote
         case .appleCompanion:
             return .iPhoneApp
@@ -406,7 +407,7 @@ enum OnboardingControlSource: String, CaseIterable, Codable, Identifiable {
     /// Siri Remote 的音频由 HCI 组件在按键时开始采集，连接本身不启动引擎，按需建立。
     /// 两者都归为 `physical_remote`，只能按来源区分，不能按控制方式区分。
     var usesOnDemandAudioOutput: Bool {
-        self == .siriRemote
+        self == .siriRemote || self == .skyworthRemote
     }
 }
 
@@ -419,7 +420,7 @@ enum OnboardingControlValidationPolicy {
     ) -> Bool {
         guard step == .controls else { return false }
         switch source {
-        case .xiaomiRemote, .siriRemote, .chromecastRemote, .appleCompanion, .webRemote:
+        case .xiaomiRemote, .skyworthRemote, .siriRemote, .chromecastRemote, .appleCompanion, .webRemote:
             return true
         case .unselected:
             return false
@@ -436,7 +437,7 @@ enum OnboardingSecureInputPolicy {
     ) -> Bool {
         guard step == .remote || step == .controls else { return false }
         switch source {
-        case .xiaomiRemote, .siriRemote, .chromecastRemote:
+        case .xiaomiRemote, .skyworthRemote, .siriRemote, .chromecastRemote:
             return true
         case .appleCompanion, .webRemote, .unselected:
             return false
@@ -523,6 +524,7 @@ enum OnboardingXiaomiRemoteModel: String, Codable, CaseIterable, Identifiable {
 enum OnboardingPhysicalRemoteCard: Identifiable, Equatable {
     case xiaomi(OnboardingXiaomiRemoteModel)
     case apple(OnboardingAppleRemoteGeneration)
+    case skyworth
 
     var id: String {
         switch self {
@@ -530,6 +532,8 @@ enum OnboardingPhysicalRemoteCard: Identifiable, Equatable {
             return "xiaomi_remote.\(model.rawValue)"
         case let .apple(generation):
             return "siri_remote.\(generation.rawValue)"
+        case .skyworth:
+            return OnboardingControlSource.skyworthRemote.rawValue
         }
     }
 
@@ -540,6 +544,9 @@ enum OnboardingPhysicalRemoteCard: Identifiable, Equatable {
         }
         if availableSources.contains(.siriRemote) {
             cards.append(contentsOf: OnboardingAppleRemoteGeneration.displayOrder.map(Self.apple))
+        }
+        if availableSources.contains(.skyworthRemote) {
+            cards.append(.skyworth)
         }
         return cards
     }
@@ -630,7 +637,7 @@ enum OnboardingBuildCapabilities {
     static func availableControlSources(
         siriRemotePackageInstalled: Bool
     ) -> [OnboardingControlSource] {
-        var sources: [OnboardingControlSource] = [.xiaomiRemote]
+        var sources: [OnboardingControlSource] = [.xiaomiRemote, .skyworthRemote]
         #if SAYALL_SIRI_REMOTE_ENABLED
         if siriRemotePackageInstalled { sources.append(.siriRemote) }
         #endif
@@ -751,6 +758,7 @@ struct OnboardingVoicePairingPlan: Equatable {
         shortcut: VoiceKeyMode,
         from source: OnboardingControlSource
     ) -> Bool {
+        if source == .skyworthRemote { return gesture == .hold && shortcut == .function }
         if source.supportedGestureModes.contains(gesture) { return true }
         return gesture == .toggle &&
             shortcut == .function &&
@@ -810,7 +818,7 @@ enum OnboardingRemotePhotoKind: Equatable {
             return .siriRemote
         case .chromecastRemote:
             return .chromecastRemote
-        case .appleCompanion, .webRemote, .unselected:
+        case .skyworthRemote, .appleCompanion, .webRemote, .unselected:
             return .placeholder
         }
     }

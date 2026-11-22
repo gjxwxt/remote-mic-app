@@ -4119,10 +4119,13 @@ struct OnboardingFlowTests {
                 #expect(remoteSource.settings.onboardingControlSource == .siriRemote)
                 #expect(remoteSource.settings.onboardingAppleRemoteGeneration == generation)
                 #expect(remoteSource.settings.siriRemoteEnabled)
+            case .skyworth:
+                #expect(remoteSource.settings.onboardingControlSource == .skyworthRemote)
+                #expect(remoteSource.settings.onboardingAppleRemoteGeneration == nil)
+                #expect(!remoteSource.settings.siriRemoteEnabled)
             }
         }
-        for source in visibleSources where source != .siriRemote {
-            guard source != .xiaomiRemote else { continue }
+        for source in visibleSources where [.appleCompanion, .webRemote].contains(source) {
             let id = "control-source.\(source.rawValue)"
             invoke(id, on: remoteSource)
             #expect(remoteSource.settings.onboardingControlSource == source)

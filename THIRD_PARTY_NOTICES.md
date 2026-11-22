@@ -1,5 +1,15 @@
 # Third-party notices
 
+## Google libsbc
+
+- Project: `google/libsbc`
+- Source: <https://github.com/google/libsbc>
+- Reference revision: `6e505650145c9973d08a0bdd5e5f5e1914305e40`
+- Copyright: 2022 Google LLC
+- License: Apache License 2.0 (`Apache-2.0`)
+
+The YK-8E00 experimental HID voice adapter statically links the unmodified portable C SBC implementation in `Sources/SBCCodec`. Its license is bundled as `SBC-LICENSE.txt`. No ARM-specific assembly, external codec executable, or user recording is included.
+
 ## Oxanium
 
 - Project: Google Fonts Oxanium

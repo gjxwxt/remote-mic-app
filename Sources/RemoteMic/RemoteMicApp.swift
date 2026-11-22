@@ -598,7 +598,7 @@ private final class RemoteMicAppDelegate: NSObject, NSApplicationDelegate, NSMen
         statusItem = item
         appliedStatusItemPresentation = nil
         statusItemPresentation = .resolve(
-            physicalConnected: model.isConnected,
+            physicalConnected: model.isConnected || model.skyworthRemoteConnected,
             phoneConnected: model.isPhoneRemoteConnected,
             watchConnected: model.isWatchRemoteConnected,
             webState: model.webRemoteState,
@@ -910,7 +910,10 @@ private final class RemoteMicAppDelegate: NSObject, NSApplicationDelegate, NSMen
             .sink { [weak self] _ in self?.refreshMenuStatus() }
             .store(in: &subscriptions)
         StatusItemPresentation.publisher(
-            physicalConnected: model.$isConnected.eraseToAnyPublisher(),
+            physicalConnected: model.$isConnected.combineLatest(model.$skyworthRemoteConnected)
+                .map { $0 || $1 }
+                .removeDuplicates()
+                .eraseToAnyPublisher(),
             phoneConnected: model.$isPhoneRemoteConnected.eraseToAnyPublisher(),
             watchConnected: model.$isWatchRemoteConnected.eraseToAnyPublisher(),
             webState: model.$webRemoteState.eraseToAnyPublisher(),
@@ -931,6 +934,7 @@ private final class RemoteMicAppDelegate: NSObject, NSApplicationDelegate, NSMen
             model.$hidStatus,
             model.$isStreaming
         )
+        .combineLatest(model.$skyworthRemoteConnected)
         .receive(on: RunLoop.main)
         .sink { [weak self] _ in
             self?.refreshMenuStatus()
@@ -1102,7 +1106,11 @@ private final class RemoteMicAppDelegate: NSObject, NSApplicationDelegate, NSMen
     }
 
     private func refreshMenuStatus() {
-        connectionItem.title = model.connectionStatus.text(using: localization)
+        if model.skyworthRemoteConnected && !model.isConnected {
+            connectionItem.title = localization.text("onboarding.control_source.skyworth_remote.title")
+        } else {
+            connectionItem.title = model.connectionStatus.text(using: localization)
+        }
         audioItem.title = model.isStreaming
             ? localization.text("connection.status.voice_active")
             : model.audioStatus.text(using: localization)

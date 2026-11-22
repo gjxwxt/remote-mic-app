@@ -1302,7 +1302,13 @@ struct SettingsView: View {
             CompatibilityGlassContainer(spacing: 14) {
                 HStack(alignment: .top, spacing: 14) {
                     VStack(spacing: 14) {
-                        connectionDevicePanel
+                        let showsSkyworth = model.skyworthRemoteConnected || settings.onboardingControlSource == .skyworthRemote
+                        if showsSkyworth {
+                            skyworthConnectionPanel
+                        }
+                        if !showsSkyworth || settings.remoteDeviceProfiles.contains(where: { model.isRemoteConnected($0.id) }) {
+                            connectionDevicePanel
+                        }
                         devicesPanel
 #if SAYALL_SIRI_REMOTE_ENABLED
                         if showsAppleRemoteComponentInstallation {
@@ -1638,6 +1644,49 @@ struct SettingsView: View {
                 }
             }
         }
+    }
+
+    private var skyworthConnectionPanel: some View {
+        GlassPanel {
+            VStack(alignment: .leading, spacing: 10) {
+                Label("onboarding.control_source.skyworth_remote.title", systemImage: "appletvremote.gen4")
+                    .font(.system(size: 14, weight: .semibold))
+                connectionStatusLine(
+                    symbol: model.skyworthRemoteConnected ? "checkmark.circle" : "antenna.radiowaves.left.and.right",
+                    text: localization.text(model.skyworthRemoteConnected
+                        ? "connection.skyworth.connected" : "connection.skyworth.disconnected"),
+                    tint: model.skyworthRemoteConnected ? .green : .secondary
+                )
+                if model.skyworthRemoteConnected {
+                    connectionStatusLine(symbol: "mic", text: localization.text(skyworthVoiceStatusKey), tint: .secondary)
+                    if !model.skyworthFnHoldConfigured {
+                        Button("connection.skyworth.use_fn") {
+                            model.setVoiceFnTapModeEnabled(false)
+                            model.setVoiceKeyMode(.function)
+                        }
+                        .compatibilityButtonStyle(.standard)
+                        .disabled(model.isStreaming)
+                    }
+                } else {
+                    Button("connection.skyworth.open_bluetooth") {
+                        if let url = URL(string: "x-apple.systempreferences:com.apple.BluetoothSettings") {
+                            NSWorkspace.shared.open(url)
+                        }
+                    }
+                    .compatibilityButtonStyle(.standard)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    private var skyworthVoiceStatusKey: String {
+        if model.activePhysicalVoiceControlSource == .skyworthRemote {
+            return "connection.status.voice_streaming"
+        }
+        if !model.skyworthFnHoldConfigured { return "connection.skyworth.configure_fn" }
+        if !model.skyworthUsesSelectedVirtualOutput { return "connection.skyworth.select_audio" }
+        return "connection.skyworth.hold"
     }
 
     private var connectionDevicePanel: some View {

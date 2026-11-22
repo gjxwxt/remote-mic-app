@@ -7,6 +7,7 @@ struct MobileVoiceLifecycleTests {
         MobileVoiceSource.nearbyPhone,
         MobileVoiceSource.nearbyWatch,
         MobileVoiceSource.web,
+        MobileVoiceSource.skyworthRemote,
     ])
     func sameSourceCanRestartImmediatelyAfterStopDrain(_ source: MobileVoiceSource) throws {
         var state = MobileVoiceLifecycleState()
@@ -27,6 +28,8 @@ struct MobileVoiceLifecycleTests {
         (MobileVoiceSource.nearbyPhone, MobileVoiceSource.nearbyWatch),
         (MobileVoiceSource.web, MobileVoiceSource.nearbyPhone),
         (MobileVoiceSource.nearbyWatch, MobileVoiceSource.web),
+        (MobileVoiceSource.skyworthRemote, MobileVoiceSource.web),
+        (MobileVoiceSource.web, MobileVoiceSource.skyworthRemote),
     ])
     func anotherSourceRemainsBusyUntilStopDrainCompletes(
         active: MobileVoiceSource,
