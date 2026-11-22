@@ -722,6 +722,9 @@ final class BridgeAppModel: NSObject, ObservableObject, XiaomiBluetoothBridgeDel
     @Published private(set) var activeVoiceSource: UsageEventSource?
     @Published private(set) var skyworthRemoteConnected = false
     @Published private(set) var lastSkyworthRemoteButtonPress: RemoteButton?
+    @Published private(set) var lastSkyworthButton: SkyworthButton?
+    @Published private(set) var activeSkyworthButtons: Set<SkyworthButton> = []
+    @Published private(set) var skyworthButtonMappings: [SkyworthButton: SkyworthButtonBinding] = SkyworthButtonMappingStore.load()
     @Published private(set) var lastMobileRemoteButtonObservation: MobileRemoteButtonObservation?
     @Published private(set) var isPhoneRemoteConnectionEnabled = false
     @Published private(set) var isPhoneRemoteConnected = false
@@ -757,6 +760,8 @@ final class BridgeAppModel: NSObject, ObservableObject, XiaomiBluetoothBridgeDel
             self.skyworthRemoteConnected = connected
             if !connected {
                 self.lastSkyworthRemoteButtonPress = nil
+                self.lastSkyworthButton = nil
+                self.activeSkyworthButtons = []
                 self.releaseVirtualAudioOutputIfUnused(reason: "skyworth_disconnected")
             } else if self.skyworthUsesSelectedVirtualOutput {
                 self.resumeVirtualAudioOutputIfNeeded(reason: "skyworth_connected")
@@ -764,6 +769,14 @@ final class BridgeAppModel: NSObject, ObservableObject, XiaomiBluetoothBridgeDel
         }
         monitor.onButtonPress = { [weak self] button in
             self?.lastSkyworthRemoteButtonPress = button
+        }
+        monitor.onSkyworthHeldButtonsChange = { [weak self] held in
+            self?.activeSkyworthButtons = held
+        }
+        monitor.onSkyworthButtonPress = { [weak self] button in
+            guard let self else { return }
+            self.lastSkyworthButton = button
+            self.performSkyworthButtonAction(for: button)
         }
         monitor.onStart = { [weak self] in
             guard let self, self.started, !self.systemAudioSuspensionState.isSuspended,
@@ -780,7 +793,8 @@ final class BridgeAppModel: NSObject, ObservableObject, XiaomiBluetoothBridgeDel
         monitor.onAudio = { [weak self] in self?.receivePhoneAudio($0, source: .skyworthRemote) }
         monitor.onStop = { [weak self] reason in
             guard let self, self.activeMobileVoiceSource == .skyworthRemote else { return }
-            if reason != "release_unobserved", self.pendingMobileVoiceStartSource == .skyworthRemote {
+            if reason != "release_unobserved" && reason != "button_release",
+               self.pendingMobileVoiceStartSource == .skyworthRemote {
                 self.pendingMobileVoiceStartSource = nil
                 self.pendingMobileVoiceAudio.cancel()
                 self.pendingMobileVoiceStopReason = nil
@@ -802,6 +816,39 @@ final class BridgeAppModel: NSObject, ObservableObject, XiaomiBluetoothBridgeDel
 
     var skyworthFnHoldConfigured: Bool {
         settings.voiceKeyMode == .function && !settings.voiceFnTapModeEnabled
+    }
+
+    func skyworthButtonBinding(for button: SkyworthButton) -> SkyworthButtonBinding {
+        skyworthButtonMappings[button] ?? SkyworthButtonMappingStore.defaultMappings[button] ?? .native
+    }
+
+    func setSkyworthButtonBinding(_ binding: SkyworthButtonBinding, for button: SkyworthButton) {
+        skyworthButtonMappings[button] = binding
+        SkyworthButtonMappingStore.save(skyworthButtonMappings)
+    }
+
+    func resetSkyworthButtonMappings() {
+        skyworthButtonMappings = SkyworthButtonMappingStore.defaultMappings
+        SkyworthButtonMappingStore.save(skyworthButtonMappings)
+    }
+
+    private func performSkyworthButtonAction(for button: SkyworthButton) {
+        let suppressDuringOnboarding = OnboardingControlValidationPolicy.suppressConfiguredActions(
+            at: settings.onboardingStep,
+            source: settings.onboardingControlSource
+        )
+        guard !suppressDuringOnboarding else { return }
+        let binding = skyworthButtonBinding(for: button)
+        guard let configured = binding.configuredAction else { return }
+        if configured.action.isAppInternal {
+            _ = performInternalAction(configured.action, source: "skyworth:\(button.rawValue)")
+            return
+        }
+        guard KeyboardInjector.isAccessibilityTrusted else {
+            _ = KeyboardInjector.requestAccessibilityAccess()
+            return
+        }
+        _ = performExternalConfiguredAction(configured)
     }
 
     var skyworthUsesSelectedVirtualOutput: Bool {

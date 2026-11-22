@@ -143,11 +143,87 @@ struct SkyworthSBCDecoderTests {
         monitor.onStart = { starts += 1; return true }
         monitor.onStop = { stops.append($0) }
         monitor.receive(reportID: 0x5A, data: report(encoded.prefix(120)))
-        try await Task.sleep(for: .milliseconds(450))
+        try await Task.sleep(for: .milliseconds(650))
         #expect(stops == ["release_unobserved"])
         monitor.receive(reportID: 0x5A, data: report(encoded.prefix(120)))
         #expect(starts == 2)
         monitor.stop(reason: "test_end")
         #expect(stops == ["release_unobserved", "test_end"])
+    }
+
+    @Test @MainActor func physicalVoiceTriggerStartsBeforeAudioAndClosesNormallyOnRelease() {
+        let monitor = SkyworthVoiceMonitor()
+        var starts = 0
+        var audioSamples = 0
+        var stops: [String] = []
+        var buttons: [RemoteButton] = []
+        var logs: [String] = []
+        monitor.onStart = { starts += 1; return true }
+        monitor.onAudio = { audioSamples += $0.count }
+        monitor.onStop = { stops.append($0) }
+        monitor.onButtonPress = { buttons.append($0) }
+        monitor.log = { logs.append($0) }
+
+        let press: [UInt8] = [1, 0, 0, 0xEA, 0, 0, 0, 0, 0]
+        let empty: [UInt8] = [1, 0, 0, 0x00, 0, 0, 0, 0, 0]
+        let release: [UInt8] = [1, 0, 0, 0xEB, 0, 0, 0, 0, 0]
+
+        press.withUnsafeBufferPointer { monitor.receiveButtons(reportID: 1, bytes: $0) }
+        empty.withUnsafeBufferPointer { monitor.receiveButtons(reportID: 1, bytes: $0) }
+        #expect(starts == 1)
+        #expect(buttons.isEmpty)
+
+        monitor.receive(reportID: 0x5A, data: report(encoded.prefix(120)))
+        #expect(starts == 1)
+        #expect(audioSamples == 256)
+
+        release.withUnsafeBufferPointer { monitor.receiveButtons(reportID: 1, bytes: $0) }
+        release.withUnsafeBufferPointer { monitor.receiveButtons(reportID: 1, bytes: $0) }
+        #expect(stops == ["button_release"])
+        #expect(buttons.isEmpty)
+        #expect(logs.contains { $0.contains("trigger_observation=physical_ea") })
+        #expect(logs.contains { $0.contains("completion=normal") && $0.contains("release_observation=physical_eb") })
+    }
+
+    @Test @MainActor func observedYK8E00KeycodesMapToExpectedSkyworthButtons() {
+        let monitor = SkyworthVoiceMonitor()
+        var skyworthButtons: [SkyworthButton] = []
+        var legacyButtons: [RemoteButton] = []
+        var heldSnapshots: [Set<SkyworthButton>] = []
+        monitor.onSkyworthButtonPress = { skyworthButtons.append($0) }
+        monitor.onButtonPress = { legacyButtons.append($0) }
+        monitor.onSkyworthHeldButtonsChange = { heldSnapshots.append($0) }
+
+        let observedCodes: [UInt8] = [0x96, 0xF1, 0x80, 0x81, 0x65, 0xA0, 0xC9, 0xCA, 0x66]
+        let empty: [UInt8] = [1, 0, 0, 0, 0, 0, 0, 0, 0]
+        for code in observedCodes {
+            let report: [UInt8] = [1, 0, 0, code, 0, 0, 0, 0, 0]
+            report.withUnsafeBufferPointer { monitor.receiveButtons(reportID: 1, bytes: $0) }
+            empty.withUnsafeBufferPointer { monitor.receiveButtons(reportID: 1, bytes: $0) }
+        }
+        #expect(skyworthButtons == [.ok, .back, .volumeUp, .volumeDown, .menu, .input, .multitask, .quickDots, .power])
+        // Multitask (0xC9) and Quick Dots (0xCA) must not mislabel as TV or Play/Pause.
+        #expect(legacyButtons == [.ok, .back, .volumeUp, .volumeDown, .menu, .input, .power])
+        #expect(heldSnapshots.first == [.ok])
+        #expect(heldSnapshots.last == [])
+    }
+
+    @Test func skyworthMappingStorePersistsCustomBindingsAndDefaults() {
+        let suiteName = "test.skyworth.mapping.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let initial = SkyworthButtonMappingStore.load(from: defaults)
+        #expect(initial[.quickDots] == .action(.appSwitcher))
+        #expect(initial[.multitask] == .action(.missionControl))
+        #expect(initial[.ok] == .action(.returnKey))
+
+        var updated = initial
+        updated[.quickDots] = .action(.screenshot)
+        SkyworthButtonMappingStore.save(updated, to: defaults)
+
+        let reloaded = SkyworthButtonMappingStore.load(from: defaults)
+        #expect(reloaded[.quickDots] == .action(.screenshot))
+        #expect(reloaded[.ok] == .action(.returnKey))
     }
 }

@@ -6,11 +6,16 @@ import IOKit.hid
 final class SkyworthVoiceMonitor {
     static let vendorID = 0x0094
     static let productID = 0x0013
-    // No physical release report has been established. A gap closes this
-    // experimental stream as forced/unknown, never as verified normal release.
-    static let idleTimeout: TimeInterval = 0.30
+    // Physical voice trigger press (0xEA) and release (0xEB) arrive on report 1.
+    // Keep a 0.50s idle fallback so normal 0xEB (~270-290ms after last audio)
+    // always closes cleanly while BLE drops still recover automatically.
+    static let idleTimeout: TimeInterval = 0.50
+    static let voicePressUsage: UInt8 = 0xEA
+    static let voiceReleaseUsage: UInt8 = 0xEB
     var onConnectionChange: ((Bool) -> Void)?
     var onButtonPress: ((RemoteButton) -> Void)?
+    var onSkyworthButtonPress: ((SkyworthButton) -> Void)?
+    var onSkyworthHeldButtonsChange: ((Set<SkyworthButton>) -> Void)?
     var onStart: (() -> Bool)?
     var onAudio: (([Int16]) -> Void)?
     var onStop: ((String) -> Void)?
@@ -20,6 +25,7 @@ final class SkyworthVoiceMonitor {
     private var device: IOHIDDevice?
     private let buffer = UnsafeMutablePointer<UInt8>.allocate(capacity: 512)
     private var heldButtons: [UInt32: Set<RemoteButton>] = [:]
+    private var heldSkyworthButtons: [UInt32: Set<SkyworthButton>] = [:]
     private var decoder = SkyworthSBCDecoder()
     private var idleWork: DispatchWorkItem?
     private var generation: UInt64 = 0
@@ -29,6 +35,7 @@ final class SkyworthVoiceMonitor {
     private var packets = 0
     private var samples = 0
     private var startedAt: TimeInterval = 0
+    private var triggerDownAt: TimeInterval?
     private var candidates: [UInt: IOHIDDevice] = [:]
 
     deinit {
@@ -63,7 +70,7 @@ final class SkyworthVoiceMonitor {
             stop(reason: "manager_open")
             return
         }
-        log("SKYWORTH HID phase=started model_family=yk8e00 release_observation=unknown")
+        log("SKYWORTH HID phase=started model_family=yk8e00 release_observation=physical_eb")
     }
 
     func stop(reason: String) {
@@ -123,7 +130,7 @@ final class SkyworthVoiceMonitor {
             case 1, 2:
                 owner.receiveButtons(reportID: id, bytes: UnsafeBufferPointer(start: bytes, count: count))
             default:
-                break
+                owner.logUnknownReport(reportID: id, bytes: bytes, count: count)
             }
         }, Unmanaged.passUnretained(self).toOpaque())
         log("SKYWORTH HID phase=ready model_family=yk8e00")
@@ -140,41 +147,112 @@ final class SkyworthVoiceMonitor {
             onConnectionChange?(false)
         }
         heldButtons.removeAll()
+        if !heldSkyworthButtons.isEmpty {
+            heldSkyworthButtons.removeAll()
+            onSkyworthHeldButtonsChange?([])
+        }
         decoder.reset()
     }
 
-    // Only standard keyboard/consumer controls declared in this device's
-    // descriptor. Observe edges for setup without consuming macOS input.
+    // Hardware-verified YK-8E00 (0094:0013) keyboard & consumer controls.
+    // Report 1 carries ordinary keys + physical voice press (0xEA) / release (0xEB).
     func receiveButtons(reportID: UInt32, bytes: UnsafeBufferPointer<UInt8>) {
         guard bytes.first == UInt8(exactly: reportID) else { return }
-        let buttons: Set<RemoteButton>
+        let skyworthButtons: Set<SkyworthButton>
+        let legacyButtons: Set<RemoteButton>
         switch (reportID, bytes.count) {
         case (1, 9):
-            let keys: [UInt8: RemoteButton] = [
-                0x28: .ok, 0x29: .back, 0x2A: .back,
+            let skyworthKeys: [UInt8: SkyworthButton] = [
+                0x28: .ok, 0x96: .ok,
+                0x29: .back, 0x2A: .back, 0xF1: .back,
                 0x4F: .right, 0x50: .left, 0x51: .down, 0x52: .up,
+                0x80: .volumeUp, 0x81: .volumeDown,
+                0x65: .menu, 0x66: .power,
+                0xA0: .input, 0xC9: .multitask, 0xCA: .quickDots,
             ]
             // Report ID, modifier mask and reserved byte precede six key usages.
             let usages = bytes.dropFirst(3)
             guard !usages.contains(where: { (1...3).contains($0) }) else { return }
-            buttons = Set(usages.compactMap { keys[$0] })
+            if usages.contains(Self.voicePressUsage) {
+                handlePhysicalVoicePress()
+            }
+            if usages.contains(Self.voiceReleaseUsage) {
+                handlePhysicalVoiceRelease()
+            }
+            skyworthButtons = Set(usages.compactMap { skyworthKeys[$0] })
+            legacyButtons = Set(skyworthButtons.compactMap(\.legacyRemoteButton))
         case (2, 4):
             // Consumer usages in descriptor order: play/pause, mute,
             // volume up/down, AC Home, then AC Back.
-            let bindings: [(Int, RemoteButton)] = [
+            let legacyBindings: [(Int, RemoteButton)] = [
                 (3, .playPause), (4, .mute), (7, .volumeUp), (8, .volumeDown),
                 (18, .home), (19, .back),
             ]
-            buttons = Set(bindings.compactMap { bit, button in
+            legacyButtons = Set(legacyBindings.compactMap { bit, button in
+                bytes[1 + bit / 8] & (1 << (bit % 8)) != 0 ? button : nil
+            })
+            let skyworthBindings: [(Int, SkyworthButton)] = [
+                (7, .volumeUp), (8, .volumeDown),
+                (18, .home), (19, .back),
+            ]
+            skyworthButtons = Set(skyworthBindings.compactMap { bit, button in
                 bytes[1 + bit / 8] & (1 << (bit % 8)) != 0 ? button : nil
             })
         default:
             return
         }
-        let newlyPressed = buttons.subtracting(heldButtons[reportID, default: []])
-        heldButtons[reportID] = buttons
-        for button in newlyPressed.sorted(by: { $0.rawValue < $1.rawValue }) {
+        let newlyPressedSkyworth = skyworthButtons.subtracting(heldSkyworthButtons[reportID, default: []])
+        let previousCombined = heldSkyworthButtons.values.reduce(into: Set<SkyworthButton>()) { $0.formUnion($1) }
+        heldSkyworthButtons[reportID] = skyworthButtons
+        let currentCombined = heldSkyworthButtons.values.reduce(into: Set<SkyworthButton>()) { $0.formUnion($1) }
+        if previousCombined != currentCombined {
+            onSkyworthHeldButtonsChange?(currentCombined)
+        }
+        for button in newlyPressedSkyworth.sorted(by: { $0.rawValue < $1.rawValue }) {
+            onSkyworthButtonPress?(button)
+        }
+
+        let newlyPressedLegacy = legacyButtons.subtracting(heldButtons[reportID, default: []])
+        heldButtons[reportID] = legacyButtons
+        for button in newlyPressedLegacy.sorted(by: { $0.rawValue < $1.rawValue }) {
             onButtonPress?(button)
+        }
+    }
+
+    private func handlePhysicalVoicePress() {
+        if active {
+            closeStream(reason: "retriggered")
+        }
+        rejected = false
+        decoder.reset()
+        generation &+= 1
+        let now = ProcessInfo.processInfo.systemUptime
+        startedAt = now
+        triggerDownAt = now
+        packets = 0
+        samples = 0
+        guard onStart?() == true else {
+            rejected = true
+            triggerDownAt = nil
+            scheduleIdle()
+            log("SKYWORTH VOICE generation=\(generation) phase=rejected reason=host_unavailable trigger_observation=physical_ea")
+            return
+        }
+        active = true
+        scheduleIdle()
+        log("SKYWORTH VOICE generation=\(generation) phase=started trigger_observation=physical_ea")
+    }
+
+    private func handlePhysicalVoiceRelease() {
+        if active {
+            closeStream(reason: "button_release")
+        } else if rejected {
+            idleWork?.cancel()
+            idleWork = nil
+            idleRevision &+= 1
+            rejected = false
+            triggerDownAt = nil
+            decoder.reset()
         }
     }
 
@@ -191,7 +269,7 @@ final class SkyworthVoiceMonitor {
             return
         }
         guard let decoded = decoder.decode(reportID: reportID, data: data) else {
-            log("SKYWORTH VOICE generation=\(generation) phase=failed reason=invalid_sbc diagnostic_boundary=profile_or_crc")
+            log("SKYWORTH VOICE generation=\(generation) phase=failed reason=invalid_sbc len=\(data.count) diagnostic_boundary=profile_or_crc")
             closeStream(reason: "invalid_sbc")
             rejected = true
             scheduleIdle()
@@ -201,6 +279,7 @@ final class SkyworthVoiceMonitor {
         if !active {
             generation &+= 1
             startedAt = ProcessInfo.processInfo.systemUptime
+            triggerDownAt = nil
             packets = 0
             samples = 0
             guard onStart?() == true else {
@@ -211,6 +290,9 @@ final class SkyworthVoiceMonitor {
             }
             active = true
             log("SKYWORTH VOICE generation=\(generation) phase=started trigger_observation=first_audio trigger_down_to_first_pcm_ms=unknown")
+        } else if packets == 0, let downAt = triggerDownAt {
+            let leadMs = max(0, Int((ProcessInfo.processInfo.systemUptime - downAt) * 1000))
+            log("SKYWORTH VOICE generation=\(generation) phase=first_audio trigger_down_to_first_pcm_ms=\(leadMs)")
         }
         packets += 1
         samples += decoded.count
@@ -237,11 +319,23 @@ final class SkyworthVoiceMonitor {
         if active {
             active = false
             let elapsed = max(0, Int((ProcessInfo.processInfo.systemUptime - startedAt) * 1000))
-            log("SKYWORTH VOICE generation=\(generation) phase=stopping completion=forced reason=\(reason) packets=\(packets) decoded_samples=\(samples) elapsed_ms=\(elapsed) release_observation=unknown")
+            let isPhysicalRelease = reason == "button_release"
+            let completion = isPhysicalRelease ? "normal" : "forced"
+            let releaseObservation = isPhysicalRelease ? "physical_eb" : "unknown"
+            log("SKYWORTH VOICE generation=\(generation) phase=stopping completion=\(completion) reason=\(reason) packets=\(packets) decoded_samples=\(samples) elapsed_ms=\(elapsed) release_observation=\(releaseObservation)")
             onStop?(reason)
         }
         rejected = false
+        triggerDownAt = nil
         decoder.reset()
+    }
+
+    private func logUnknownReport(reportID: UInt32, bytes: UnsafePointer<UInt8>, count: Int) {
+        let shown = min(count, 32)
+        let hex = UnsafeBufferPointer(start: bytes, count: shown)
+            .map { String(format: "%02x", $0) }
+            .joined(separator: " ")
+        log("SKYWORTH HID_REPORT id=\(String(format: "0x%02x", reportID)) len=\(count) hex=\(hex)")
     }
 
     private static func key(_ device: IOHIDDevice) -> UInt {

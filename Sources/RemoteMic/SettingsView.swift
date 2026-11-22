@@ -1652,29 +1652,10 @@ struct SettingsView: View {
         settingsPage {
             PageHeader(title: localization.text("settings.section.buttons"))
         } content: {
-            VStack(alignment: .leading, spacing: 16) {
-                skyworthConnectionPanel
-                GlassPanel {
-                    VStack(alignment: .leading, spacing: 12) {
-                        Text("onboarding.side.skyworth_native_controls")
-                            .font(.system(size: 14, weight: .semibold))
-                        Text("button_mapping.skyworth.native_detail")
-                            .foregroundStyle(.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
-                        HStack {
-                            Text("button_mapping.skyworth.last_button")
-                            Spacer()
-                            Text(model.lastSkyworthRemoteButtonPress?.displayName(using: localization)
-                                ?? localization.text("button_mapping.skyworth.waiting"))
-                        }
-                        Button("button_mapping.skyworth.open_voice") {
-                            selectedSection = .connection
-                        }
-                        .compatibilityButtonStyle(.standard)
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                }
-            }
+            SkyworthButtonsMappingView(
+                model: model,
+                onOpenVoiceConnection: { selectedSection = .connection }
+            )
         }
     }
 
