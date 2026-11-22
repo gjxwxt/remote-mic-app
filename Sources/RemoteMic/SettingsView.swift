@@ -1320,7 +1320,9 @@ struct SettingsView: View {
                     }
                         .frame(width: SettingsPageBehavior.mappingRemoteCardWidth + 32, alignment: .top)
                     VStack(spacing: 14) {
-                        phoneConnectionsPanel
+                        if !SkyworthPersonalEdition.isEnabled {
+                            phoneConnectionsPanel
+                        }
                         audioSettingsPanel
                     }
                     .frame(maxWidth: .infinity, alignment: .topLeading)
@@ -7297,7 +7299,12 @@ struct SettingsView: View {
                                     }
                                     .buttonStyle(.plain)
                                     .contentShape(Rectangle())
-                                    if case .available = updateInformation.state {
+                                    if SkyworthPersonalEdition.isEnabled {
+                                        StatusPill(
+                                            text: localization.text("skyworth.about.personal_badge"),
+                                            tint: .green
+                                        )
+                                    } else if case .available = updateInformation.state {
                                         StatusPill(
                                             text: localization.text("about.version.available"),
                                             tint: .green
@@ -7306,40 +7313,47 @@ struct SettingsView: View {
                                     Spacer(minLength: 8)
                                 }
 
-                                HStack(spacing: 12) {
-                                    Button(action: checkForUpdates) {
-                                        Label(
-                                            "menu.check_for_updates",
-                                            systemImage: "arrow.triangle.2.circlepath"
-                                        )
-                                    }
-                                    .compatibilityButtonStyle(.standard)
-                                    .fixedSize(horizontal: true, vertical: false)
-
-                                    Spacer(minLength: 12)
-
-                                    Toggle(
-                                        "about.version.check_prerelease",
-                                        isOn: $settings.checksForPreReleaseUpdates
-                                    )
-                                    .toggleStyle(.switch)
-                                    .font(.system(size: 12))
-                                }
-
-                                Divider()
-
-                                updateInformationContent
-                                if case let .available(update) = updateInformation.state {
-                                    HStack {
-                                        Spacer()
+                                if SkyworthPersonalEdition.isEnabled {
+                                    Text("skyworth.about.personal_note")
+                                        .font(.system(size: 12))
+                                        .foregroundStyle(.secondary)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                } else {
+                                    HStack(spacing: 12) {
                                         Button(action: checkForUpdates) {
-                                            Text(String(
-                                                format: localization.text("about.version.update_to"),
-                                                locale: localization.locale,
-                                                arguments: [update.displayVersion]
-                                            ))
+                                            Label(
+                                                "menu.check_for_updates",
+                                                systemImage: "arrow.triangle.2.circlepath"
+                                            )
                                         }
-                                        .compatibilityButtonStyle(.prominent)
+                                        .compatibilityButtonStyle(.standard)
+                                        .fixedSize(horizontal: true, vertical: false)
+
+                                        Spacer(minLength: 12)
+
+                                        Toggle(
+                                            "about.version.check_prerelease",
+                                            isOn: $settings.checksForPreReleaseUpdates
+                                        )
+                                        .toggleStyle(.switch)
+                                        .font(.system(size: 12))
+                                    }
+
+                                    Divider()
+
+                                    updateInformationContent
+                                    if case let .available(update) = updateInformation.state {
+                                        HStack {
+                                            Spacer()
+                                            Button(action: checkForUpdates) {
+                                                Text(String(
+                                                    format: localization.text("about.version.update_to"),
+                                                    locale: localization.locale,
+                                                    arguments: [update.displayVersion]
+                                                ))
+                                            }
+                                            .compatibilityButtonStyle(.prominent)
+                                        }
                                     }
                                 }
                             }
@@ -7350,7 +7364,9 @@ struct SettingsView: View {
                         .overlay(alignment: .bottom) { Divider() }
                     }
 
-                    hardwareAnnouncementPanel
+                    if !SkyworthPersonalEdition.isEnabled {
+                        hardwareAnnouncementPanel
+                    }
 
                     inlinePermissionsSection
 

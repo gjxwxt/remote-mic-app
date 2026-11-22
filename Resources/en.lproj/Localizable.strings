@@ -1645,6 +1645,8 @@
 "skyworth.group.navigation" = "Navigation & Scroll";
 "skyworth.group.media" = "Media & System";
 "skyworth.group.sayall" = "SayAll";
+"skyworth.about.personal_badge" = "YK-8E00 Personal";
+"skyworth.about.personal_note" = "Local personal fork build. Official Sparkle auto-updates are disabled to prevent overwriting custom YK-8E00 support.";
 "connection.skyworth.disconnected" = "Waiting for YK-8E00";
 "connection.skyworth.hold" = "Hold the remote’s voice button to speak";
 "connection.skyworth.select_audio" = "Select the SayAll virtual microphone";

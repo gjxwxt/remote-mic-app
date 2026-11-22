@@ -664,7 +664,9 @@ private final class RemoteMicAppDelegate: NSObject, NSApplicationDelegate, NSMen
         menu.addItem(.separator())
         menu.addItem(menuItem("menu.about", action: #selector(showAbout)))
         menu.addItem(versionMenuItem())
-        menu.addItem(menuItem("menu.check_for_updates", action: #selector(checkForUpdates)))
+        if !SkyworthPersonalEdition.isEnabled {
+            menu.addItem(menuItem("menu.check_for_updates", action: #selector(checkForUpdates)))
+        }
         menu.addItem(menuItem("about.support.github", action: #selector(openGitHub)))
         menu.addItem(menuItem("about.support.website", action: #selector(openWebsite)))
         menu.addItem(.separator())
@@ -1079,6 +1081,7 @@ private final class RemoteMicAppDelegate: NSObject, NSApplicationDelegate, NSMen
     }
 
     private func startUpdaterIfNeeded() {
+        guard !SkyworthPersonalEdition.isEnabled else { return }
         guard !updaterStarted else { return }
         updaterController.updater.automaticallyChecksForUpdates =
             UpdateCheckPolicy(

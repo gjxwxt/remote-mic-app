@@ -1,6 +1,13 @@
 import AppKit
 import Foundation
 
+/// Central switch for the personal YK-8E00 fork build.
+/// Keeps upstream files minimally modified while disabling official Sparkle self-updates
+/// (which would overwrite the custom fork) and hiding unused commercial panels.
+enum SkyworthPersonalEdition {
+    static let isEnabled = true
+}
+
 /// Hardware-verified physical buttons on Skyworth YK-8E00 (VID 0x0094, PID 0x0013).
 /// Kept separate from `RemoteButton` so upstream Xiaomi/Siri/Chromecast enums remain untouched.
 enum SkyworthButton: String, CaseIterable, Codable, Identifiable, Hashable {
