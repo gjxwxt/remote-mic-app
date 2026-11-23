@@ -727,6 +727,13 @@ final class BridgeAppModel: NSObject, ObservableObject, XiaomiBluetoothBridgeDel
     @Published private(set) var skyworthMappingConfig: SkyworthMappingConfiguration = SkyworthButtonMappingStore.loadConfiguration()
     @Published private(set) var frontmostAppBundleID: String? = NSWorkspace.shared.frontmostApplication?.bundleIdentifier
     private let skyworthGestureRecognizer = SkyworthGestureRecognizer()
+    private let skyworthAppSwitcherSession: KeyboardInjector.AppSwitcherSession = {
+        let session = KeyboardInjector.AppSwitcherSession()
+        // macOS 14/15 App Switcher ignores synthetic arrow keys; Tab / Shift+Tab cycles reliably.
+        session.markArrowNavigation(supported: false)
+        return session
+    }()
+    private var skyworthAppSwitcherWatchdog: DispatchWorkItem?
     private var skyworthWorkspaceObserver: NSObjectProtocol?
     @Published private(set) var lastMobileRemoteButtonObservation: MobileRemoteButtonObservation?
     @Published private(set) var isPhoneRemoteConnectionEnabled = false
@@ -770,6 +777,7 @@ final class BridgeAppModel: NSObject, ObservableObject, XiaomiBluetoothBridgeDel
                 self.lastSkyworthButton = nil
                 self.activeSkyworthButtons = []
                 self.skyworthGestureRecognizer.reset()
+                self.cancelSkyworthAppSwitcherIfActive()
                 self.releaseVirtualAudioOutputIfUnused(reason: "skyworth_disconnected")
             } else if self.skyworthUsesSelectedVirtualOutput {
                 self.resumeVirtualAudioOutputIfNeeded(reason: "skyworth_connected")
@@ -784,6 +792,9 @@ final class BridgeAppModel: NSObject, ObservableObject, XiaomiBluetoothBridgeDel
         monitor.onSkyworthButtonPress = { [weak self] button in
             guard let self else { return }
             self.lastSkyworthButton = button
+            if self.handleSkyworthAppSwitcherButtonPress(button) {
+                return
+            }
             let gestures = self.skyworthMappingConfig.resolvedGestures(
                 for: button,
                 frontmostBundleID: self.frontmostAppBundleID
@@ -791,10 +802,14 @@ final class BridgeAppModel: NSObject, ObservableObject, XiaomiBluetoothBridgeDel
             self.skyworthGestureRecognizer.handlePress(button: button, gestures: gestures)
         }
         monitor.onSkyworthButtonRelease = { [weak self] button in
-            self?.skyworthGestureRecognizer.handleRelease(button: button)
+            guard let self else { return }
+            if self.skyworthAppSwitcherSession.isActive { return }
+            self.skyworthGestureRecognizer.handleRelease(button: button)
         }
         monitor.onStart = { [weak self] in
-            guard let self, self.started, !self.systemAudioSuspensionState.isSuspended,
+            guard let self else { return false }
+            self.cancelSkyworthAppSwitcherIfActive()
+            guard self.started, !self.systemAudioSuspensionState.isSuspended,
                   self.skyworthUsesSelectedVirtualOutput, self.skyworthFnHoldConfigured,
                   !self.isStreaming, !self.voiceKeyLatch.isHeld,
                   !self.bluetoothVoiceActive, self.appleRemoteVoiceDevices.isEmpty,
@@ -910,6 +925,16 @@ final class BridgeAppModel: NSObject, ObservableObject, XiaomiBluetoothBridgeDel
         guard let binding = gestures.binding(for: gesture),
               let configured = binding.configuredAction
         else { return }
+        if configured.action == .appSwitcher {
+            guard KeyboardInjector.isAccessibilityTrusted else {
+                _ = KeyboardInjector.requestAccessibilityAccess()
+                return
+            }
+            if skyworthAppSwitcherSession.trigger() {
+                scheduleSkyworthAppSwitcherWatchdog()
+            }
+            return
+        }
         if configured.action.isAppInternal {
             _ = performInternalAction(configured.action, source: "skyworth:\(button.rawValue):\(gesture.rawValue)")
             return
@@ -919,6 +944,60 @@ final class BridgeAppModel: NSObject, ObservableObject, XiaomiBluetoothBridgeDel
             return
         }
         _ = performExternalConfiguredAction(configured)
+    }
+
+    private func handleSkyworthAppSwitcherButtonPress(_ button: SkyworthButton) -> Bool {
+        guard skyworthAppSwitcherSession.isActive else { return false }
+        scheduleSkyworthAppSwitcherWatchdog()
+        switch button {
+        case .left:
+            _ = skyworthAppSwitcherSession.moveSelection(left: true)
+            return true
+        case .right:
+            _ = skyworthAppSwitcherSession.moveSelection(left: false)
+            return true
+        case .up, .down:
+            _ = skyworthAppSwitcherSession.moveWindowSelection(up: button == .up)
+            return true
+        case .ok:
+            skyworthAppSwitcherWatchdog?.cancel()
+            skyworthAppSwitcherWatchdog = nil
+            _ = skyworthAppSwitcherSession.confirm()
+            return true
+        case .back:
+            cancelSkyworthAppSwitcherIfActive()
+            return true
+        default:
+            let gestures = skyworthMappingConfig.resolvedGestures(
+                for: button,
+                frontmostBundleID: frontmostAppBundleID
+            )
+            if gestures.singleClick == .action(.appSwitcher) {
+                _ = skyworthAppSwitcherSession.trigger()
+                return true
+            }
+            cancelSkyworthAppSwitcherIfActive()
+            return false
+        }
+    }
+
+    private func scheduleSkyworthAppSwitcherWatchdog() {
+        skyworthAppSwitcherWatchdog?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            self?.cancelSkyworthAppSwitcherIfActive()
+        }
+        skyworthAppSwitcherWatchdog = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 8.0, execute: work)
+    }
+
+    private func cancelSkyworthAppSwitcherIfActive() {
+        skyworthAppSwitcherWatchdog?.cancel()
+        skyworthAppSwitcherWatchdog = nil
+        if skyworthAppSwitcherSession.isActive {
+            _ = skyworthAppSwitcherSession.cancel()
+        } else {
+            _ = skyworthAppSwitcherSession.forceReleaseModifiersIfNeeded()
+        }
     }
 
     var skyworthUsesSelectedVirtualOutput: Bool {
